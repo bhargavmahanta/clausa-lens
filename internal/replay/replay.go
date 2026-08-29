@@ -196,6 +196,44 @@ func Evaluate(ctx context.Context, pack contracts.SystemPack, run contracts.Repl
 	return completed, nil
 }
 
+// IsolationFor builds real, default-deny isolation evidence from what a runner
+// actually did: whether it interacted with the payment simulator and the
+// replay-only ledger datastore, the run's namespace, and whether teardown
+// succeeded. A runner must derive payment/ledger flags from the actions it
+// performed (e.g. the events it captured) so the evidence is never fabricated.
+func IsolationFor(runID, namespace string, paymentTouched, ledgerTouched bool, teardownOK bool) contracts.IsolationEvidence {
+	teardown := contracts.VerdictPass
+	if !teardownOK {
+		teardown = contracts.VerdictFail
+	}
+	evidence := contracts.IsolationEvidence{
+		PolicyVersion:         contracts.ContractVersion,
+		Verdict:               contracts.VerdictPass,
+		RuntimeNamespace:      namespace,
+		NetworkPolicy:         contracts.VerdictPass,
+		CredentialProfile:     contracts.CredentialReplayOnly,
+		DatastoreDestinations: []string{},
+		SimulatorInteractions: []contracts.DependencyInteraction{},
+		DeniedInteractions:    []contracts.DependencyInteraction{},
+		TeardownResult:        teardown,
+	}
+	if paymentTouched {
+		evidence.SimulatorInteractions = append(evidence.SimulatorInteractions, contracts.DependencyInteraction{
+			Dependency:  "payment_simulator",
+			Destination: "http://payment-simulator:8080",
+			Operation:   "authorize",
+			Result:      contracts.InteractionSimulated,
+		})
+	}
+	if ledgerTouched {
+		evidence.DatastoreDestinations = append(evidence.DatastoreDestinations, "postgres://replay/ledger_run_"+namespace)
+	}
+	if teardown != contracts.VerdictPass {
+		evidence.Verdict = contracts.VerdictFail
+	}
+	return evidence
+}
+
 // ValidateIsolation returns an error when the isolation evidence is not
 // default-deny safe: a production datastore destination, a failed network
 // policy, a denied interaction, a failed teardown, or a non-replay credential

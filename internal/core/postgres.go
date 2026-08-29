@@ -211,6 +211,35 @@ func (r *PostgresRepository) GetRun(ctx context.Context, id string) (contracts.R
 	return getJSON[contracts.ReplayRun](ctx, r.db, `SELECT payload FROM replay_runs WHERE run_id=$1`, id)
 }
 
+// ListRuns returns runs in the given status, in deterministic run_id order.
+func (r *PostgresRepository) ListRuns(ctx context.Context, status contracts.ReplayRunStatus) ([]contracts.ReplayRun, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT payload FROM replay_runs WHERE status=$1 ORDER BY run_id`, status)
+	if err != nil {
+		return nil, repositoryError(err)
+	}
+	defer rows.Close()
+	return scanRuns(ctx, rows)
+}
+
+func scanRuns(ctx context.Context, rows *sql.Rows) ([]contracts.ReplayRun, error) {
+	runs := []contracts.ReplayRun{}
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, ErrInternal
+		}
+		run, err := decodePayload[contracts.ReplayRun](raw)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, ErrInternal
+	}
+	return runs, nil
+}
+
 func (r *PostgresRepository) PutDiff(ctx context.Context, d contracts.ReplayDiff) error {
 	if err := d.Validate(); err != nil {
 		return err
@@ -285,32 +314,28 @@ func countRows(ctx context.Context, q rowQueryer, table string) (int, error) {
 	return n, nil
 }
 
-// EventsForRun loads a run's replayed events (matching replay_run_id) or its
-// capsule's event_ids when none are recorded, in a stable chronological order.
+// EventsForRun loads a run's replayed events (matching replay_run_id) in a
+// stable chronological order. It never falls back to the incident's original
+// events or the capsule's event_ids, so a run with no recorded replay events
+// returns an empty slice and the worker can fail it rather than re-score source
+// evidence.
 func (r *PostgresRepository) EventsForRun(ctx context.Context, run contracts.ReplayRun) ([]contracts.ExecutionEvent, error) {
 	events, err := loadEventsForRun(ctx, r.db, run)
 	if err != nil {
 		return nil, err
 	}
-	if len(events) > 0 {
-		return events, nil
+	if len(events) == 0 {
+		return nil, nil
 	}
-	c, err := r.GetCapsule(ctx, run.CapsuleID)
-	if err != nil {
-		return nil, err
-	}
-	if len(c.EventIDs) == 0 {
-		return nil, ErrNotFound
-	}
-	return loadEvents(ctx, r.db, c.EventIDs)
+	return events, nil
 }
 
 func (r *PostgresRepository) GraphsForRun(ctx context.Context, run contracts.ReplayRun) (contracts.ExecutionGraph, error) {
-	c, err := r.GetCapsule(ctx, run.CapsuleID)
+	events, err := r.EventsForRun(ctx, run)
 	if err != nil {
 		return contracts.ExecutionGraph{}, err
 	}
-	return getJSON[contracts.ExecutionGraph](ctx, r.db, `SELECT payload FROM execution_graphs WHERE graph_id=$1`, c.GraphID)
+	return BuildRunGraph(run.RunID, events)
 }
 
 type eventQueryer interface {
@@ -324,22 +349,6 @@ func loadEventsForRun(ctx context.Context, q eventQueryer, run contracts.ReplayR
 	}
 	defer rows.Close()
 	return scanEvents(ctx, rows)
-}
-
-func loadEvents(ctx context.Context, q eventQueryer, ids []string) ([]contracts.ExecutionEvent, error) {
-	rows, err := q.QueryContext(ctx, `SELECT payload FROM execution_events WHERE event_id = ANY($1) ORDER BY occurred_at, sequence, event_id`, ids)
-	if err != nil {
-		return nil, repositoryError(err)
-	}
-	defer rows.Close()
-	events, err := scanEvents(ctx, rows)
-	if err != nil {
-		return nil, err
-	}
-	if len(events) != len(ids) {
-		return nil, ErrNotFound
-	}
-	return events, nil
 }
 
 func scanEvents(ctx context.Context, rows *sql.Rows) ([]contracts.ExecutionEvent, error) {

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sort"
 	"sync"
@@ -17,6 +18,7 @@ type Repository interface {
 	ListIncidents(context.Context, contracts.IncidentListQuery) (contracts.IncidentListResponse, error)
 	GetIncidentDetail(context.Context, string) (contracts.IncidentDetailResponse, error)
 	EventsForExecution(context.Context, string) ([]contracts.ExecutionEvent, error)
+	ListRuns(context.Context, contracts.ReplayRunStatus) ([]contracts.ReplayRun, error)
 }
 
 type Store struct {
@@ -286,6 +288,23 @@ func (s *Store) GetRun(ctx context.Context, id string) (contracts.ReplayRun, err
 	return run, nil
 }
 
+// ListRuns returns runs in the given status, in deterministic RunID order.
+func (s *Store) ListRuns(ctx context.Context, status contracts.ReplayRunStatus) ([]contracts.ReplayRun, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, ErrInternal
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	runs := make([]contracts.ReplayRun, 0)
+	for _, run := range s.runs {
+		if run.Status == status {
+			runs = append(runs, run)
+		}
+	}
+	sort.Slice(runs, func(i, j int) bool { return runs[i].RunID < runs[j].RunID })
+	return runs, nil
+}
+
 func (s *Store) TransitionRun(ctx context.Context, from contracts.ReplayRunStatus, run contracts.ReplayRun) error {
 	if err := ctx.Err(); err != nil {
 		return ErrInternal
@@ -335,46 +354,72 @@ func (s *Store) GetDiff(ctx context.Context, id string) (contracts.ReplayDiff, e
 	return d, nil
 }
 
-// EventsForRun returns the events of a run in a stable order. It prefers the
-// run's observed_event_ids, else the referenced capsule's event_ids.
+// EventsForRun returns only the events the run itself observed during replay:
+// events whose replay_run_id equals the run id, in deterministic chronological
+// order. It deliberately never falls back to the incident's original events or
+// the capsule's event_ids; a run with no recorded replay events yields an empty
+// slice so the worker can fail such a run rather than re-score source evidence.
 func (s *Store) EventsForRun(ctx context.Context, run contracts.ReplayRun) ([]contracts.ExecutionEvent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, ErrInternal
 	}
-	ids := run.ObservedEventIDs
-	if len(ids) == 0 {
-		c, err := s.GetCapsule(ctx, run.CapsuleID)
-		if err != nil {
-			return nil, err
-		}
-		ids = c.EventIDs
-	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	events := make([]contracts.ExecutionEvent, 0, len(ids))
-	for _, id := range ids {
-		e, exists := s.events[id]
-		if !exists {
-			return nil, ErrNotFound
+	events := make([]contracts.ExecutionEvent, 0)
+	for _, e := range s.events {
+		if e.ReplayRunID == run.RunID {
+			events = append(events, e)
 		}
-		events = append(events, e)
 	}
 	return stableOrder(events), nil
 }
 
-// GraphsForRun returns the execution graph referenced by the run's capsule.
+// GraphsForRun returns the execution graph derived from a run's own observed
+// replay events (parent/child relationship from each event's parent_event_id,
+// deterministically timeline-ordered), never the incident's captured graph. A
+// run's graph is its own replay graph so Replay Diff orders the run's actual
+// replay events rather than the source evidence.
 func (s *Store) GraphsForRun(ctx context.Context, run contracts.ReplayRun) (contracts.ExecutionGraph, error) {
-	c, err := s.GetCapsule(ctx, run.CapsuleID)
+	events, err := s.EventsForRun(ctx, run)
 	if err != nil {
 		return contracts.ExecutionGraph{}, err
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	g, exists := s.graphs[c.GraphID]
-	if !exists {
-		return contracts.ExecutionGraph{}, ErrNotFound
+	return BuildRunGraph(run.RunID, events)
+}
+
+// BuildRunGraph derives a deterministic replay execution graph for a run's
+// observed events. It is shared by the in-memory and Postgres repositories so
+// Replay Diff always aligns a run's real replay events.
+func BuildRunGraph(runID string, events []contracts.ExecutionEvent) (contracts.ExecutionGraph, error) {
+	edges := parentChildEdges(events)
+	nodes, err := graphpkg.BuildNodes(events, edges)
+	if err != nil {
+		return contracts.ExecutionGraph{}, err
 	}
-	return g, nil
+	return contracts.ExecutionGraph{
+		SchemaVersion:         contracts.ContractVersion,
+		GraphID:               "graph-run-" + runID,
+		IncidentID:            runID,
+		OrderingPolicyVersion: contracts.ContractVersion,
+		Nodes:                 nodes,
+		Edges:                 edges,
+	}, nil
+}
+
+func parentChildEdges(events []contracts.ExecutionEvent) []contracts.GraphEdge {
+	edges := make([]contracts.GraphEdge, 0, len(events))
+	for i, event := range events {
+		if event.ParentEventID == "" {
+			continue
+		}
+		edges = append(edges, contracts.GraphEdge{
+			EdgeID:      fmt.Sprintf("edge-%d", i),
+			FromEventID: event.ParentEventID,
+			ToEventID:   event.EventID,
+			Type:        contracts.GraphEdgeParentChild,
+		})
+	}
+	return edges
 }
 
 func stableOrder(events []contracts.ExecutionEvent) []contracts.ExecutionEvent {

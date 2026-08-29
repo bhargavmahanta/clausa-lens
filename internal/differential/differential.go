@@ -51,6 +51,17 @@ type Alignment interface {
 		[]string, []string, []contracts.EventChange, error)
 }
 
+// DiffBuilder is an optional, richer capability a pack may provide. When the
+// pack also implements the frozen SystemPack.Compare, differential.Build uses
+// its canonical FirstMeaningfulDivergence when the generic field-change
+// derivation finds none (a structural divergence, e.g. a removed TIMEOUT event,
+// is not a field change on a matched pair). Packs that do not implement it keep
+// the generic behavior; core stays pack-agnostic.
+type DiffBuilder interface {
+	Compare(ctx context.Context, diffID string, baseline contracts.ReplayExecution,
+		comparison contracts.ReplayExecution) (contracts.ReplayDiff, error)
+}
+
 // Build assembles a contract-valid ReplayDiff for a baseline and comparison run.
 // It validates the frozen prerequisites (both COMPLETED, baseline REPRODUCED,
 // comparison what-if with a matching baseline_run_id, same capsule hash, exactly
@@ -126,8 +137,19 @@ func Build(ctx context.Context, store Store, diffID, baselineRunID, comparisonRu
 	}
 
 	if comparisonRun.Outcome != contracts.ReplayOutcomeInconclusive {
-		diff.FirstMeaningfulDivergence = FirstDivergenceFrom(
-			baselineEvents.events, comparisonEvents.events, changes, added, removed)
+		divergence := FirstDivergenceFrom(baselineEvents.events, comparisonEvents.events, changes, added, removed)
+		if divergence == nil {
+			// Structural divergence: the pack may express a scenario-specific
+			// rule (e.g. a removed TIMEOUT event) that the generic
+			// field-change derivation cannot name. Delegate to its Compare.
+			if builder, ok := pack.(DiffBuilder); ok {
+				full, err := builder.Compare(ctx, diffID, baselineExec, comparisonExec)
+				if err == nil {
+					divergence = full.FirstMeaningfulDivergence
+				}
+			}
+		}
+		diff.FirstMeaningfulDivergence = divergence
 	}
 
 	if err := diff.Validate(); err != nil {

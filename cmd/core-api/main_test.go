@@ -283,6 +283,12 @@ func (f *fakeRepository) EventsForExecution(_ context.Context, executionID strin
 	}
 	return f.eventsByExec[executionID], nil
 }
+func (f *fakeRepository) ListRuns(context.Context, contracts.ReplayRunStatus) ([]contracts.ReplayRun, error) {
+	if f.runErr != nil {
+		return nil, f.runErr
+	}
+	return nil, nil
+}
 func (f *fakeRepository) GraphsForRun(_ context.Context, run contracts.ReplayRun) (contracts.ExecutionGraph, error) {
 	if f.runErr != nil {
 		return contracts.ExecutionGraph{}, f.runErr

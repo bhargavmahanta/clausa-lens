@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/causalens/causalens/internal/contracts"
@@ -19,6 +20,61 @@ func incident(id, graphID, detected string, status contracts.IncidentStatus) con
 
 func graph(id, incidentID string, nodes ...contracts.GraphNode) contracts.ExecutionGraph {
 	return contracts.ExecutionGraph{SchemaVersion: "1.0", GraphID: id, IncidentID: incidentID, OrderingPolicyVersion: "1.0", Nodes: nodes, Edges: []contracts.GraphEdge{}}
+}
+
+func TestStoreEventsForRunNeverFallsBackToSource(t *testing.T) {
+	store := NewStore()
+	ctx := context.Background()
+
+	// A source (captured original) event, no replay_run_id, that a run's
+	// observed_event_ids previously would have returned.
+	if err := store.IngestEvent(ctx, event("src-1")); err != nil {
+		t.Fatal(err)
+	}
+	run := contracts.ReplayRun{SchemaVersion: "1.0", RunID: "run-1", ExecutionID: "e", CapsuleID: "cap-1", CapsuleHash: strings.Repeat("a", 64), RunType: contracts.RunTypeBaseline, TrialNumber: 1, Status: contracts.ReplayRunRunning, StartedAt: "2026-08-29T10:34:00Z", ObservedEventIDs: []string{"src-1"}}
+	if err := store.PutRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+
+	// No replay events captured yet: must be empty, never the source event.
+	events, err := store.EventsForRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected no replay events, got %+v", events)
+	}
+
+	// A genuine replay event for the run is returned, keyed by replay_run_id.
+	replayEv := event("rt-1")
+	replayEv.ExecutionID = "e"
+	replayEv.ReplayRunID = "run-1"
+	if err := store.IngestEvent(ctx, replayEv); err != nil {
+		t.Fatal(err)
+	}
+	events, err = store.EventsForRun(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].EventID != "rt-1" || events[0].ReplayRunID != "run-1" {
+		t.Fatalf("replay events: %+v", events)
+	}
+}
+
+func TestStoreBuildRunGraph(t *testing.T) {
+	events := []contracts.ExecutionEvent{event("a"), event("b"), event("c")}
+	events[1].ParentEventID = "a"
+	events[2].ParentEventID = "a"
+	graph, err := BuildRunGraph("run-1", events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.GraphID != "graph-run-run-1" || len(graph.Nodes) != 3 || len(graph.Edges) != 2 {
+		t.Fatalf("run graph: %+v", graph)
+	}
+	if err := graph.Validate(); err != nil {
+		t.Fatalf("run graph invalid: %v", err)
+	}
 }
 
 func TestStoreRepositorySeamAndDuplicateEvent(t *testing.T) {
