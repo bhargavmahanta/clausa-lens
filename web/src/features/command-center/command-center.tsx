@@ -10,12 +10,21 @@ import {
   createCausaLensClient,
 } from "../../lib/api";
 import type { ReplayRun } from "../../lib/contracts";
-import { IncidentCommandCenter, incidentDataSource } from "../incidents/incident-command-center";
+import {
+  IncidentCommandCenter,
+  incidentDataSource,
+  type SelectionRequest,
+} from "../incidents/incident-command-center";
+import {
+  pollForIncident,
+  requestDemoCheckout,
+} from "../demo/trigger";
 import {
   ReplayWorkspace,
   ResetDialog,
   ResetReceipt,
   buildWhatIfRequest,
+  createGenerationToken,
   initialCommandCenterReplayState,
   isActiveRunStatus,
   pollRunUntilTerminal,
@@ -63,6 +72,12 @@ function toWorkspaceState(
     : { phase: "terminal", capsule, run: state.baseline.value };
 }
 
+type DemoTriggerState =
+  | { status: "idle" }
+  | { status: "starting" }
+  | { status: "waiting" }
+  | { status: "failed"; error: FrontendError };
+
 export function CommandCenter() {
   const client = useMemo(
     () => createCausaLensClient({ baseUrl: incidentDataSource.baseUrl }),
@@ -74,21 +89,41 @@ export function CommandCenter() {
     reduceCommandCenterReplay,
     initialCommandCenterReplayState,
   );
-  const cancelled = useRef(false);
+  const [selectionRequest, setSelectionRequest] = useState<SelectionRequest>();
+  const [demo, setDemo] = useState<DemoTriggerState>({ status: "idle" });
+  const generations = useRef(createGenerationToken());
 
   const handleSelectionChange = useCallback((incidentId: string | undefined) => {
-    setSelectedIncidentId(incidentId);
+    setSelectedIncidentId((previous) => {
+      if (previous !== incidentId) {
+        generations.current.invalidate();
+        dispatch({ type: "incidentChanged" });
+      }
+      return incidentId;
+    });
   }, []);
+
+  function requestIncidentSelection(incidentId: string) {
+    generations.current.invalidate();
+    dispatch({ type: "incidentChanged" });
+    setSelectionRequest({ incidentId, nonce: Date.now() });
+  }
 
   async function monitorRun(resource: "baseline" | "whatIf", run: ReplayRun) {
     if (!isActiveRunStatus(run)) return;
-    await pollRunUntilTerminal({
+    const isCurrent = generations.current.issue();
+    const observed = await pollRunUntilTerminal({
       getRun: client.getRun,
       runId: run.run_id,
       intervalMs: 500,
-      isCancelled: () => cancelled.current,
-      onProgress: (value) => dispatch({ type: "resourceReady", resource, value }),
+      isCancelled: () => !isCurrent(),
+      onProgress: (value) => {
+        if (isCurrent()) dispatch({ type: "resourceReady", resource, value });
+      },
     });
+    if (observed && isCurrent()) {
+      dispatch({ type: "resourceReady", resource, value: observed });
+    }
   }
 
   async function compileCapsule() {
@@ -143,22 +178,55 @@ export function CommandCenter() {
   }
 
   async function confirmReset() {
+    generations.current.invalidate();
     dispatch({ type: "resetStarted" });
     try {
       const result = await client.resetDemo({ scenario_id: "checkout_duplicate_effect" });
-      cancelled.current = true;
       dispatch({ type: "resetSucceeded", result });
       setSelectedIncidentId(undefined);
       setIncidentVersion((version) => version + 1);
-      cancelled.current = false;
     } catch (error) {
       dispatch({ type: "resetFailed", error: toFrontendError(error) });
+    }
+  }
+
+  async function startFaultedCheckout() {
+    if (demo.status === "starting" || demo.status === "waiting") return;
+    setDemo({ status: "starting" });
+    try {
+      const trace = await requestDemoCheckout(fetch);
+      setDemo({ status: "waiting" });
+      const isCurrent = generations.current.issue();
+      const incident = await pollForIncident({
+        listIncidents: (query) => client.listIncidents(query),
+        trace,
+        intervalMs: 500,
+        isCancelled: () => !isCurrent(),
+      });
+      if (isCurrent()) {
+        if (!incident) {
+          setDemo({
+            status: "failed",
+            error: {
+              code: "ORACLE_UNAVAILABLE",
+              message: "No incident was detected for the faulted checkout in time.",
+              retryable: true,
+            },
+          });
+          return;
+        }
+        setDemo({ status: "idle" });
+        requestIncidentSelection(incident.incident_id);
+      }
+    } catch (error) {
+      setDemo({ status: "failed", error: toFrontendError(error) });
     }
   }
 
   const workspaceState = toWorkspaceState(state);
   const whatIf = state.whatIf.status === "ready" ? state.whatIf.value : undefined;
   const diff = state.diff.status === "ready" ? state.diff.value : undefined;
+  const demoPending = demo.status === "starting" || demo.status === "waiting";
 
   return (
     <>
@@ -167,7 +235,40 @@ export function CommandCenter() {
         <p>Contract-decoded evidence from capture through first divergence.</p>
       </section>
 
-      <IncidentCommandCenter key={incidentVersion} onSelectionChange={handleSelectionChange} />
+      <section className="demo-trigger" aria-labelledby="demo-trigger-title">
+        <div>
+          <p className="panel-kicker">Judge control</p>
+          <h2 id="demo-trigger-title">Golden scenario</h2>
+          <p className="evidence-note">Triggers the fixed faulted checkout and opens the detected incident automatically.</p>
+        </div>
+        <button
+          aria-live="polite"
+          disabled={demoPending}
+          onClick={() => void startFaultedCheckout()}
+          type="button"
+        >
+          {demo.status === "starting"
+            ? "Starting faulted checkout…"
+            : demo.status === "waiting"
+              ? "Waiting for incident detection…"
+              : "Start Faulted Checkout"}
+        </button>
+      </section>
+      {demo.status === "failed" ? (
+        <StatePanel
+          state="error"
+          title="Faulted checkout trigger failed"
+          message={demo.error.message}
+          code={demo.error.code}
+          action={<button onClick={() => setDemo({ status: "idle" })} type="button">Dismiss</button>}
+        />
+      ) : null}
+
+      <IncidentCommandCenter
+        key={incidentVersion}
+        onSelectionChange={handleSelectionChange}
+        selectionRequest={selectionRequest}
+      />
 
       <ReplayWorkspace
         baselineLoading={state.baseline.status === "loading"}

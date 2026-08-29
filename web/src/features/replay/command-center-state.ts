@@ -46,11 +46,30 @@ export type CommandCenterReplayAction =
   | { type: "resourceReady"; resource: "baseline" | "whatIf"; value: ReplayRun }
   | { type: "resourceReady"; resource: "diff"; value: ReplayDiff }
   | { type: "resourceFailed"; resource: "capsule" | "baseline" | "whatIf" | "diff"; error: FrontendError }
+  | { type: "incidentChanged" }
   | { type: "resetConfirmationOpened" }
   | { type: "resetConfirmationClosed" }
   | { type: "resetStarted" }
   | { type: "resetSucceeded"; result: ResetResult }
   | { type: "resetFailed"; error: FrontendError };
+
+export type ReplayGenerationToken = {
+  issue: () => () => boolean;
+  invalidate: () => void;
+};
+
+export function createGenerationToken(): ReplayGenerationToken {
+  let current = 0;
+  return {
+    issue: () => {
+      const generation = current;
+      return () => generation === current;
+    },
+    invalidate: () => {
+      current += 1;
+    },
+  };
+}
 
 export function reduceCommandCenterReplay(
   state: CommandCenterReplayState,
@@ -63,6 +82,19 @@ export function reduceCommandCenterReplay(
       return { ...state, [action.resource]: { status: "ready", value: action.value } };
     case "resourceFailed":
       return { ...state, [action.resource]: { status: "error", error: action.error } };
+    case "incidentChanged":
+      return state.capsule.status === "idle" &&
+        state.baseline.status === "idle" &&
+        state.whatIf.status === "idle" &&
+        state.diff.status === "idle"
+        ? state
+        : {
+            ...state,
+            capsule: { status: "idle" },
+            baseline: { status: "idle" },
+            whatIf: { status: "idle" },
+            diff: { status: "idle" },
+          };
     case "resetConfirmationOpened":
       return { ...state, reset: { status: "confirming" } };
     case "resetConfirmationClosed":

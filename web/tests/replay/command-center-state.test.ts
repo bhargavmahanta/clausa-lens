@@ -81,4 +81,57 @@ describe("command center replay state", () => {
     });
     expect("value" in state.baseline).toBe(false);
   });
+
+  it("clears all replay evidence when the investigated incident changes", async () => {
+    const { initialCommandCenterReplayState, reduceCommandCenterReplay } = await import(
+      "../../src/features/replay/command-center-state"
+    );
+    let state = reduceCommandCenterReplay(initialCommandCenterReplayState, {
+      type: "resourceReady",
+      resource: "capsule",
+      value: capsule as unknown as ReplayCapsule,
+    });
+    state = reduceCommandCenterReplay(state, {
+      type: "resourceReady",
+      resource: "baseline",
+      value: baselineRun as unknown as ReplayRun,
+    });
+    state = reduceCommandCenterReplay(state, {
+      type: "resourceReady",
+      resource: "whatIf",
+      value: whatIfRun as unknown as ReplayRun,
+    });
+    state = reduceCommandCenterReplay(state, {
+      type: "resourceReady",
+      resource: "diff",
+      value: replayDiff as unknown as ReplayDiff,
+    });
+
+    state = reduceCommandCenterReplay(state, { type: "incidentChanged" });
+
+    expect(state.capsule.status).toBe("idle");
+    expect(state.baseline.status).toBe("idle");
+    expect(state.whatIf.status).toBe("idle");
+    expect(state.diff.status).toBe("idle");
+  });
+
+  it("invalidates outstanding pollers through a generation token", async () => {
+    const { createGenerationToken } = await import(
+      "../../src/features/replay/command-center-state"
+    );
+    const token = createGenerationToken();
+
+    const firstPoll = token.issue();
+    expect(firstPoll()).toBe(true);
+
+    const secondPoll = token.issue();
+    expect(secondPoll()).toBe(true);
+
+    token.invalidate();
+    expect(firstPoll()).toBe(false);
+    expect(secondPoll()).toBe(false);
+
+    const thirdPoll = token.issue();
+    expect(thirdPoll()).toBe(true);
+  });
 });

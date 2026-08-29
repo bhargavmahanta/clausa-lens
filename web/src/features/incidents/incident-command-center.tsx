@@ -12,14 +12,20 @@ import {
 import { resolveIncidentDataSource } from "./data-source";
 
 export const incidentDataSource = resolveIncidentDataSource({
-  configuredBaseUrl: process.env.NEXT_PUBLIC_CAUSALENS_API_URL,
   isDevelopment: process.env.NODE_ENV === "development",
 });
 
+export type SelectionRequest = {
+  incidentId: string;
+  nonce: number;
+};
+
 export function IncidentCommandCenter({
   onSelectionChange,
+  selectionRequest,
 }: {
   onSelectionChange?: (incidentId: string | undefined) => void;
+  selectionRequest?: SelectionRequest;
 }) {
   const client = useMemo(
     () =>
@@ -33,17 +39,36 @@ export function IncidentCommandCenter({
   const [state, setState] = useState<IncidentDashboardState>({ status: "loading" });
   const [nextCursor, setNextCursor] = useState<string>();
   const [requestVersion, setRequestVersion] = useState(0);
+  const [pendingSelection, setPendingSelection] = useState<string>();
+  const [lastSelectionRequest, setLastSelectionRequest] = useState<SelectionRequest>();
+
+  if (selectionRequest && selectionRequest !== lastSelectionRequest) {
+    setLastSelectionRequest(selectionRequest);
+    setPendingSelection(selectionRequest.incidentId);
+  }
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadIncidentCollection() {
       try {
-        const response = await client.listIncidents({ limit: 20 });
+        const response = await client.listIncidents({ limit: 100 });
         if (cancelled) return;
 
         setIncidents(response.items);
         setNextCursor(response.next_cursor);
+
+        if (pendingSelection) {
+          const requested = response.items.find(
+            (item) => item.incident_id === pendingSelection && item.status === "READY",
+          );
+          if (requested) {
+            setPendingSelection(undefined);
+            setSelectedIncidentId(requested.incident_id);
+            return;
+          }
+        }
+
         const classification = classifyIncidentCollection(response.items);
         if (classification.status === "selected") {
           setSelectedIncidentId(classification.incidentId);
@@ -60,7 +85,7 @@ export function IncidentCommandCenter({
     return () => {
       cancelled = true;
     };
-  }, [client, onSelectionChange, requestVersion]);
+  }, [client, onSelectionChange, pendingSelection, requestVersion]);
 
   useEffect(() => {
     if (!selectedIncidentId) return;
