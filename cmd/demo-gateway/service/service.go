@@ -7,6 +7,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	checkoutsvc "github.com/causalens/causalens/cmd/demo-checkout/service"
 	"github.com/causalens/causalens/internal/capture"
@@ -63,7 +64,7 @@ func (s *Service) NextLogicalOperationID() string { return s.ids.PeekNextLogical
 // identifiers, records the ENTRYPOINT event, forwards to Checkout, and
 // records the completion.
 func (s *Service) Checkout(ctx context.Context, req Request) (Result, error) {
-	checkoutID := req.CheckoutID
+	checkoutID := normalizeCheckoutID(req.CheckoutID)
 	if checkoutID == "" {
 		seq := s.ids.NextCheckoutSeq()
 		checkoutID = fmt.Sprintf("%d", seq)
@@ -115,4 +116,15 @@ func (s *Service) Checkout(ctx context.Context, req Request) (Result, error) {
 		LogicalOperationID: logicalOperationID,
 		Attempts:           checkoutResult.Attempts,
 	}, nil
+}
+
+// normalizeCheckoutID canonicalizes a caller-supplied checkout_id to the bare
+// suffix Gateway uses to derive trace_id, execution_id, and
+// logical_operation_id. Callers may send either the raw suffix ("8271") or
+// the frozen contract's logical_operation_id-shaped value ("checkout-8271");
+// both must resolve to the same identity. An empty result (including an
+// input that is exactly the "checkout-" prefix) falls through to
+// deterministic allocation.
+func normalizeCheckoutID(raw string) string {
+	return strings.TrimPrefix(raw, "checkout-")
 }

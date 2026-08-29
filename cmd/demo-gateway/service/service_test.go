@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	checkoutsvc "github.com/causalens/causalens/cmd/demo-checkout/service"
@@ -58,6 +59,69 @@ func TestService_Checkout_UsesProvidedCheckoutID(t *testing.T) {
 	}
 	if events[0].ParentEventID != "" {
 		t.Fatalf("root event must have no parent_event_id, got %q", events[0].ParentEventID)
+	}
+}
+
+func TestService_Checkout_NormalizesContractShapedCheckoutID(t *testing.T) {
+	sink := capture.NewInMemorySink()
+	recorder := capture.NewRecorder(contracts.ComponentRef{Name: "gateway", Instance: "gateway-1"}, capture.NewIDGenerator(1), sink)
+	ids := capture.NewIDGenerator(capture.DefaultCheckoutSeed)
+	checkout := &stubCheckout{result: checkoutsvc.Result{Attempts: 2}}
+	svc := New(checkout, ids, recorder)
+
+	result, err := svc.Checkout(context.Background(), Request{CheckoutID: "checkout-8271"})
+	if err != nil {
+		t.Fatalf("Checkout: %v", err)
+	}
+	if result.TraceID != "trace-8271" {
+		t.Fatalf("TraceID = %q, want trace-8271", result.TraceID)
+	}
+	if result.ExecutionID != "exec-original-8271" {
+		t.Fatalf("ExecutionID = %q, want exec-original-8271", result.ExecutionID)
+	}
+	if result.LogicalOperationID != "checkout-8271" {
+		t.Fatalf("LogicalOperationID = %q, want checkout-8271", result.LogicalOperationID)
+	}
+	if checkout.lastReq.CheckoutID != "8271" {
+		t.Fatalf("downstream CheckoutID = %q, want canonical suffix 8271", checkout.lastReq.CheckoutID)
+	}
+
+	for _, ev := range sink.Events() {
+		if ev.LogicalOperationID != "checkout-8271" {
+			t.Fatalf("captured event logical_operation_id = %q, want checkout-8271", ev.LogicalOperationID)
+		}
+	}
+}
+
+func TestService_Checkout_RawAndContractShapedCheckoutIDsAreIdentical(t *testing.T) {
+	newResult := func(checkoutID string) Result {
+		sink := capture.NewInMemorySink()
+		recorder := capture.NewRecorder(contracts.ComponentRef{Name: "gateway", Instance: "gateway-1"}, capture.NewIDGenerator(1), sink)
+		ids := capture.NewIDGenerator(capture.DefaultCheckoutSeed)
+		checkout := &stubCheckout{result: checkoutsvc.Result{Attempts: 2}}
+		svc := New(checkout, ids, recorder)
+
+		result, err := svc.Checkout(context.Background(), Request{CheckoutID: checkoutID})
+		if err != nil {
+			t.Fatalf("Checkout(%q): %v", checkoutID, err)
+		}
+		return result
+	}
+
+	raw := newResult("8271")
+	contractShaped := newResult("checkout-8271")
+
+	if raw.TraceID != contractShaped.TraceID {
+		t.Fatalf("TraceID mismatch: raw=%q contract-shaped=%q", raw.TraceID, contractShaped.TraceID)
+	}
+	if raw.ExecutionID != contractShaped.ExecutionID {
+		t.Fatalf("ExecutionID mismatch: raw=%q contract-shaped=%q", raw.ExecutionID, contractShaped.ExecutionID)
+	}
+	if raw.LogicalOperationID != contractShaped.LogicalOperationID {
+		t.Fatalf("LogicalOperationID mismatch: raw=%q contract-shaped=%q", raw.LogicalOperationID, contractShaped.LogicalOperationID)
+	}
+	if strings.Contains(contractShaped.LogicalOperationID, "checkout-checkout-") {
+		t.Fatalf("LogicalOperationID = %q, must not double-prefix", contractShaped.LogicalOperationID)
 	}
 }
 
