@@ -56,6 +56,22 @@ describe("overview carousel orbit", () => {
     expect(middle.z).toBeLessThan(Math.max(start.z, end.z));
   });
 
+  it("lifts the side cards while dropping the rear card along the curved surface", async () => {
+    const { getOrbitTransform } = await import(
+      "../../src/features/overview/carousel"
+    );
+    const front = getOrbitTransform(0, 0, 4);
+    const right = getOrbitTransform(1, 0, 4);
+    const rear = getOrbitTransform(2, 0, 4);
+    const left = getOrbitTransform(3, 0, 4);
+
+    expect(right.y).toBeLessThan(front.y - 140);
+    expect(left.y).toBeLessThan(front.y - 140);
+    expect(right.rotateZ).toBeLessThan(0);
+    expect(left.rotateZ).toBeGreaterThan(0);
+    expect(rear.y).toBeGreaterThan(front.y + 300);
+  });
+
   it("identifies the nearest front stage throughout wrap-around", async () => {
     const { getFocusedStageIndex, getStageTargetAngle } = await import(
       "../../src/features/overview/carousel"

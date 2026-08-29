@@ -9,7 +9,8 @@ export type OverviewCarouselStage = (typeof overviewCarouselStages)[number];
 
 export type OrbitGeometry = {
   radiusX: number;
-  radiusY: number;
+  sideLift: number;
+  backDrop: number;
   depth: number;
   tilt: number;
   minScale: number;
@@ -32,9 +33,10 @@ export type OrbitTransform = {
 
 export const desktopOrbitGeometry: OrbitGeometry = {
   radiusX: 520,
-  radiusY: 170,
+  sideLift: 170,
+  backDrop: 360,
   depth: 520,
-  tilt: -0.14,
+  tilt: -0.02,
   minScale: 0.56,
   maxBlur: 4,
 };
@@ -89,7 +91,12 @@ export function getOrbitTransform(
     orbitAngle + (stageIndex * fullTurn) / count,
   );
   const rawX = Math.sin(theta) * geometry.radiusX;
-  const rawY = (1 - Math.cos(theta)) * geometry.radiusY;
+  const curveProgress = 1 - Math.cos(theta);
+  const curveQuadratic = geometry.backDrop / 2 + geometry.sideLift;
+  const curveLinear = -geometry.sideLift - curveQuadratic;
+  const rawY =
+    curveLinear * curveProgress +
+    curveQuadratic * curveProgress * curveProgress;
   const tiltCos = Math.cos(geometry.tilt);
   const tiltSin = Math.sin(geometry.tilt);
   const frontness = (Math.cos(theta) + 1) / 2;
@@ -101,7 +108,7 @@ export function getOrbitTransform(
     scale: geometry.minScale + (1 - geometry.minScale) * frontness,
     rotateX: (1 - frontness) * 8,
     rotateY: Math.sin(theta) * -24,
-    rotateZ: Math.sin(theta) * 7,
+    rotateZ: Math.sin(theta) * -14,
     opacity: 0.34 + frontness * 0.66,
     blur: geometry.maxBlur * (1 - frontness),
     zIndex: Math.round(frontness * 100),

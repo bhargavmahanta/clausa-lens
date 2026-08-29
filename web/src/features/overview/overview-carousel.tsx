@@ -52,7 +52,8 @@ function getResponsiveGeometry(width: number): OrbitGeometry {
     return {
       ...desktopOrbitGeometry,
       radiusX: Math.max(300, width * 0.86),
-      radiusY: 96,
+      sideLift: 54,
+      backDrop: 220,
       depth: 360,
       minScale: 0.68,
       maxBlur: 3,
@@ -63,7 +64,8 @@ function getResponsiveGeometry(width: number): OrbitGeometry {
     return {
       ...desktopOrbitGeometry,
       radiusX: Math.min(430, width * 0.48),
-      radiusY: 132,
+      sideLift: 72,
+      backDrop: 280,
       depth: 440,
       minScale: 0.61,
     };
@@ -173,12 +175,15 @@ export function OverviewCarousel({
     if (!scene) return;
 
     const context = gsap.context(applyTransforms, scene);
-    const observer = new ResizeObserver(applyTransforms);
-    observer.observe(scene);
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(applyTransforms);
+    observer?.observe(scene);
 
     return () => {
       animation.current?.kill();
-      observer.disconnect();
+      observer?.disconnect();
       context.revert();
     };
   }, [applyTransforms]);

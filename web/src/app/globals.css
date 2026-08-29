@@ -994,8 +994,9 @@ button:disabled { cursor: not-allowed; filter: grayscale(0.6); opacity: 0.42; }
 .topbar__meta > span::before { display: none; }
 
 .topbar__pill {
-  min-height: 52px;
-  padding: 0 1.1rem;
+  min-width: 184px;
+  min-height: 64px;
+  padding: 0 1.45rem;
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
@@ -1004,7 +1005,7 @@ button:disabled { cursor: not-allowed; filter: grayscale(0.6); opacity: 0.42; }
   border-radius: 14px;
   background: rgba(92, 92, 92, 0.2);
   color: #f4f1ec;
-  font: 500 0.82rem/1 var(--font-manrope), sans-serif;
+  font: 500 1.05rem/1 var(--font-manrope), sans-serif;
   letter-spacing: -0.02em;
   text-transform: none;
   cursor: pointer;
@@ -1084,8 +1085,8 @@ main {
   position: fixed;
   z-index: 90;
   top: 22px;
-  bottom: 22px;
-  left: max(1rem, calc((100vw - 1600px) / 2 + 1.25rem));
+  bottom: 55px;
+  left: max(2.65rem, calc((100vw - 1440px) / 2 + 2.65rem));
   width: 96px;
   display: flex;
   flex-direction: column;
@@ -1206,8 +1207,8 @@ main {
 .orbit-stage {
   position: relative;
   width: 100%;
-  height: min(760px, calc(100vh - 120px));
-  min-height: 700px;
+  height: min(840px, calc(100vh - 112px));
+  min-height: 760px;
   perspective: 1600px;
   perspective-origin: 50% 43%;
   transform-style: preserve-3d;
@@ -1225,8 +1226,8 @@ main {
   top: 76px;
   left: 50%;
   width: min(580px, 72vw);
-  min-height: 610px;
-  margin-left: min(-290px, -36vw);
+  min-height: 760px;
+  margin-left: max(-290px, -36vw);
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 44px;
@@ -1265,7 +1266,7 @@ main {
 .orbit-card__inner {
   position: relative;
   z-index: 2;
-  min-height: 610px;
+  min-height: 760px;
   padding: clamp(1.5rem, 3vw, 2.3rem);
   display: flex;
   flex-direction: column;
@@ -1442,7 +1443,7 @@ main {
   .topbar { padding-left: 7.4rem; }
   main { padding-left: 6.5rem; }
   .shell-sidebar { width: 76px; }
-  .orbit-card { width: min(560px, 72vw); margin-left: min(-280px, -36vw); }
+  .orbit-card { width: min(560px, 72vw); margin-left: max(-280px, -36vw); }
 }
 
 @media (max-width: 900px) {
@@ -1473,7 +1474,7 @@ main {
   .shell-sidebar a { width: 48px; height: 48px; }
   .overview-hero { min-height: 720px; }
   .orbit-stage { height: 690px; min-height: 690px; }
-  .orbit-card { top: 82px; width: min(540px, 76vw); min-height: 570px; margin-left: min(-270px, -38vw); }
+  .orbit-card { top: 82px; width: min(540px, 76vw); min-height: 570px; margin-left: max(-270px, -38vw); }
   .orbit-card__inner { min-height: 570px; }
 }
 
@@ -1774,8 +1775,8 @@ main {
 /* Shell overrides stay last because the legacy rail rules above remain in use below the hero. */
 .shell-sidebar {
   top: 22px;
-  bottom: 22px;
-  left: max(1rem, calc((100vw - 1600px) / 2 + 1.25rem));
+  bottom: 55px;
+  left: max(2.65rem, calc((100vw - 1440px) / 2 + 2.65rem));
   width: 96px;
   display: flex;
   flex-direction: column;
@@ -1816,13 +1817,14 @@ main {
 }
 
 .topbar__pill {
-  min-height: 52px;
-  padding: 0 1.1rem;
+  min-width: 184px;
+  min-height: 64px;
+  padding: 0 1.45rem;
   border: 0;
   border-radius: 14px;
   background: rgba(92, 92, 92, 0.2);
   color: #f4f1ec;
-  font: 500 0.82rem/1 var(--font-manrope), sans-serif;
+  font: 500 1.05rem/1 var(--font-manrope), sans-serif;
   letter-spacing: -0.02em;
   text-transform: none;
 }
