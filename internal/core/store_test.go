@@ -28,3 +28,10 @@ func TestStorePersistsIncident(t *testing.T) {
 		t.Fatal("incident detail not returned")
 	}
 }
+
+func TestRunErrorUsesFrozenFields(t *testing.T) {
+	e := contracts.RunError{Code: contracts.SchemaInvalid, Message: "bad", Retryable: false}
+	if e.Code != "SCHEMA_INVALID" || e.Retryable {
+		t.Fatal("invalid error envelope")
+	}
+}

@@ -19,7 +19,7 @@ func main() {
 		}
 		var e contracts.ExecutionEvent
 		if json.NewDecoder(r.Body).Decode(&e) != nil || s.IngestEvent(e) != nil {
-			http.Error(w, `{"error":{"code":"VALIDATION_ERROR","message":"invalid event"}}`, 400)
+			writeError(w, http.StatusBadRequest, contracts.RunError{Code: contracts.SchemaInvalid, Message: "invalid event", Retryable: false})
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -51,4 +51,10 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{"incident": incident, "graph": graph, "events": events})
 	})
 	http.ListenAndServe(":8080", mux)
+}
+
+func writeError(w http.ResponseWriter, status int, e contracts.RunError) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]any{"error": e})
 }

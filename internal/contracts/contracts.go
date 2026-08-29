@@ -243,15 +243,23 @@ type ResetResult struct {
 	Status        string `json:"status"`
 	Ready         bool   `json:"ready"`
 }
+type ErrorCode string
+
+const (
+	SchemaInvalid   ErrorCode = "SCHEMA_INVALID"
+	InternalFailure ErrorCode = "INTERNAL_FAILURE"
+)
+
 type ValidationIssue struct {
-	Code    string `json:"code"`
-	Path    string `json:"path"`
-	Message string `json:"message"`
+	Code    ErrorCode `json:"code"`
+	Path    string    `json:"path"`
+	Message string    `json:"message"`
 }
 type RunError struct {
-	Code    string         `json:"code"`
-	Message string         `json:"message"`
-	Details map[string]any `json:"details,omitempty"`
+	Code      ErrorCode      `json:"code"`
+	Message   string         `json:"message"`
+	Retryable bool           `json:"retryable"`
+	Details   map[string]any `json:"details,omitempty"`
 }
 
 var rfc3339 = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T.*Z$`)
