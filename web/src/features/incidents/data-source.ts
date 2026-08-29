@@ -12,5 +12,5 @@ export function resolveIncidentDataSource({
     return { baseUrl: "/api/dev", mode: "fixture" };
   }
 
-  return { baseUrl: "/v1", mode: "core" };
+  return { baseUrl: "", mode: "core" };
 }

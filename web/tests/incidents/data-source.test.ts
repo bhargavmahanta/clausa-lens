@@ -10,9 +10,9 @@ describe("incident data source", () => {
     });
   });
 
-  it("uses the same-origin server proxy in production", () => {
+  it("uses an empty same-origin base in production so the client supplies the single /v1 prefix", () => {
     expect(resolveIncidentDataSource({ isDevelopment: false })).toEqual({
-      baseUrl: "/v1",
+      baseUrl: "",
       mode: "core",
     });
   });

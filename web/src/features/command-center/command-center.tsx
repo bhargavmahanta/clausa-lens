@@ -9,29 +9,27 @@ import {
   ProtocolError,
   createCausaLensClient,
 } from "../../lib/api";
-import type { ReplayRun } from "../../lib/contracts";
+import type { Incident } from "../../lib/contracts";
 import {
   IncidentCommandCenter,
   incidentDataSource,
   type SelectionRequest,
 } from "../incidents/incident-command-center";
-import {
-  pollForIncident,
-  requestDemoCheckout,
-} from "../demo/trigger";
+import { buildWhatIfRequest } from "../replay/workflow";
 import {
   ReplayWorkspace,
   ResetDialog,
   ResetReceipt,
-  buildWhatIfRequest,
-  createGenerationToken,
   initialCommandCenterReplayState,
   isActiveRunStatus,
-  pollRunUntilTerminal,
   reduceCommandCenterReplay,
   type FrontendError,
   type ReplayWorkflowState,
 } from "../replay";
+import {
+  createCommandCenterWorkflow,
+  type DemoTriggerState,
+} from "./workflow";
 
 function toFrontendError(error: unknown): FrontendError {
   if (error instanceof CausaLensApiError) {
@@ -72,12 +70,6 @@ function toWorkspaceState(
     : { phase: "terminal", capsule, run: state.baseline.value };
 }
 
-type DemoTriggerState =
-  | { status: "idle" }
-  | { status: "starting" }
-  | { status: "waiting" }
-  | { status: "failed"; error: FrontendError };
-
 export function CommandCenter() {
   const client = useMemo(
     () => createCausaLensClient({ baseUrl: incidentDataSource.baseUrl }),
@@ -91,135 +83,78 @@ export function CommandCenter() {
   );
   const [selectionRequest, setSelectionRequest] = useState<SelectionRequest>();
   const [demo, setDemo] = useState<DemoTriggerState>({ status: "idle" });
-  const generations = useRef(createGenerationToken());
+  const selectedIncidentRef = useRef<string | undefined>(undefined);
 
-  const handleSelectionChange = useCallback((incidentId: string | undefined) => {
-    setSelectedIncidentId((previous) => {
-      if (previous !== incidentId) {
-        generations.current.invalidate();
-        dispatch({ type: "incidentChanged" });
-      }
-      return incidentId;
-    });
+  const handleIncidentDetected = useCallback((incident: Incident) => {
+    dispatch({ type: "incidentChanged" });
+    setSelectionRequest({ incidentId: incident.incident_id, nonce: Date.now() });
   }, []);
 
-  function requestIncidentSelection(incidentId: string) {
-    generations.current.invalidate();
-    dispatch({ type: "incidentChanged" });
-    setSelectionRequest({ incidentId, nonce: Date.now() });
+  const workflow = useMemo(
+    () =>
+      createCommandCenterWorkflow({
+        client,
+        dispatch,
+        onDemoState: setDemo,
+        onIncidentDetected: handleIncidentDetected,
+        toFrontendError,
+      }),
+    [client, handleIncidentDetected],
+  );
+
+  const handleSelectionChange = useCallback(
+    (incidentId: string | undefined) => {
+      if (selectedIncidentRef.current !== incidentId) {
+        selectedIncidentRef.current = incidentId;
+        workflow.invalidate();
+        dispatch({ type: "incidentChanged" });
+        setDemo((current) =>
+          current.status === "starting" || current.status === "waiting"
+            ? { status: "idle" }
+            : current,
+        );
+      }
+      setSelectedIncidentId(incidentId);
+    },
+    [workflow],
+  );
+
+  function compileCapsule() {
+    void workflow.compileCapsule(selectedIncidentId);
   }
 
-  async function monitorRun(resource: "baseline" | "whatIf", run: ReplayRun) {
-    if (!isActiveRunStatus(run)) return;
-    const isCurrent = generations.current.issue();
-    const observed = await pollRunUntilTerminal({
-      getRun: client.getRun,
-      runId: run.run_id,
-      intervalMs: 500,
-      isCancelled: () => !isCurrent(),
-      onProgress: (value) => {
-        if (isCurrent()) dispatch({ type: "resourceReady", resource, value });
-      },
-    });
-    if (observed && isCurrent()) {
-      dispatch({ type: "resourceReady", resource, value: observed });
-    }
-  }
-
-  async function compileCapsule() {
-    if (!selectedIncidentId) return;
-    dispatch({ type: "resourceLoading", resource: "capsule" });
-    try {
-      const value = await client.createCapsule(selectedIncidentId);
-      dispatch({ type: "resourceReady", resource: "capsule", value });
-    } catch (error) {
-      dispatch({ type: "resourceFailed", resource: "capsule", error: toFrontendError(error) });
-    }
-  }
-
-  async function startBaseline() {
+  function startBaseline() {
     if (state.capsule.status !== "ready") return;
-    dispatch({ type: "resourceLoading", resource: "baseline" });
-    try {
-      const value = await client.createRun(state.capsule.value.capsule_id, { run_type: "BASELINE" });
-      dispatch({ type: "resourceReady", resource: "baseline", value });
-      await monitorRun("baseline", value);
-    } catch (error) {
-      dispatch({ type: "resourceFailed", resource: "baseline", error: toFrontendError(error) });
-    }
+    void workflow.startBaseline(state.capsule.value.capsule_id);
   }
 
-  async function startWhatIf() {
+  function startWhatIf() {
     if (state.capsule.status !== "ready" || state.baseline.status !== "ready") return;
     const request = buildWhatIfRequest(state.baseline.value);
     if (!request) return;
-    dispatch({ type: "resourceLoading", resource: "whatIf" });
-    try {
-      const value = await client.createRun(state.capsule.value.capsule_id, request);
-      dispatch({ type: "resourceReady", resource: "whatIf", value });
-      await monitorRun("whatIf", value);
-    } catch (error) {
-      dispatch({ type: "resourceFailed", resource: "whatIf", error: toFrontendError(error) });
-    }
+    void workflow.startWhatIf(state.capsule.value.capsule_id, request);
   }
 
-  async function createDiff() {
+  function createDiff() {
     if (state.baseline.status !== "ready" || state.whatIf.status !== "ready") return;
-    dispatch({ type: "resourceLoading", resource: "diff" });
-    try {
-      const value = await client.createDiff({
-        baseline_run_id: state.baseline.value.run_id,
-        comparison_run_id: state.whatIf.value.run_id,
-      });
-      dispatch({ type: "resourceReady", resource: "diff", value });
-    } catch (error) {
-      dispatch({ type: "resourceFailed", resource: "diff", error: toFrontendError(error) });
-    }
+    void workflow.createDiff({
+      baseline_run_id: state.baseline.value.run_id,
+      comparison_run_id: state.whatIf.value.run_id,
+    });
   }
 
   async function confirmReset() {
-    generations.current.invalidate();
-    dispatch({ type: "resetStarted" });
+    workflow.invalidate();
+    setDemo({ status: "idle" });
     try {
-      const result = await client.resetDemo({ scenario_id: "checkout_duplicate_effect" });
-      dispatch({ type: "resetSucceeded", result });
-      setSelectedIncidentId(undefined);
-      setIncidentVersion((version) => version + 1);
-    } catch (error) {
-      dispatch({ type: "resetFailed", error: toFrontendError(error) });
-    }
-  }
-
-  async function startFaultedCheckout() {
-    if (demo.status === "starting" || demo.status === "waiting") return;
-    setDemo({ status: "starting" });
-    try {
-      const trace = await requestDemoCheckout(fetch);
-      setDemo({ status: "waiting" });
-      const isCurrent = generations.current.issue();
-      const incident = await pollForIncident({
-        listIncidents: (query) => client.listIncidents(query),
-        trace,
-        intervalMs: 500,
-        isCancelled: () => !isCurrent(),
-      });
-      if (isCurrent()) {
-        if (!incident) {
-          setDemo({
-            status: "failed",
-            error: {
-              code: "ORACLE_UNAVAILABLE",
-              message: "No incident was detected for the faulted checkout in time.",
-              retryable: true,
-            },
-          });
-          return;
-        }
-        setDemo({ status: "idle" });
-        requestIncidentSelection(incident.incident_id);
+      const result = await workflow.confirmReset();
+      if (result) {
+        selectedIncidentRef.current = undefined;
+        setSelectedIncidentId(undefined);
+        setIncidentVersion((version) => version + 1);
       }
-    } catch (error) {
-      setDemo({ status: "failed", error: toFrontendError(error) });
+    } catch {
+      // confirmReset maps failures itself; this guard keeps the UI alive.
     }
   }
 
@@ -244,7 +179,7 @@ export function CommandCenter() {
         <button
           aria-live="polite"
           disabled={demoPending}
-          onClick={() => void startFaultedCheckout()}
+          onClick={() => void workflow.startFaultedCheckout()}
           type="button"
         >
           {demo.status === "starting"
@@ -275,10 +210,10 @@ export function CommandCenter() {
         diff={diff}
         diffLoading={state.diff.status === "loading"}
         hasSelectedIncident={Boolean(selectedIncidentId)}
-        onCompile={() => void compileCapsule()}
-        onCreateDiff={() => void createDiff()}
-        onStartBaseline={() => void startBaseline()}
-        onStartWhatIf={() => void startWhatIf()}
+        onCompile={compileCapsule}
+        onCreateDiff={createDiff}
+        onStartBaseline={startBaseline}
+        onStartWhatIf={startWhatIf}
         state={workspaceState}
         whatIfLoading={state.whatIf.status === "loading"}
         whatIfRun={whatIf}
@@ -289,7 +224,7 @@ export function CommandCenter() {
 
       <section className="reset-control" aria-labelledby="reset-control-title">
         <div><p className="panel-kicker">Deterministic scenario</p><h2 id="reset-control-title">Reset demo workflow</h2></div>
-        <button onClick={() => dispatch({ type: "resetConfirmationOpened" })} type="button">Reset demo workflow</button>
+        <button onClick={() => void confirmReset()} type="button">Reset demo workflow</button>
       </section>
       {state.reset.status === "confirming" || state.reset.status === "submitting" ? (
         <ResetDialog
