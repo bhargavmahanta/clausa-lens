@@ -1,12 +1,15 @@
 import { z } from "zod";
 
-const nonEmptyString = z.string().min(1);
+const contractString = z.string();
+const identifierString = z.string().min(1);
 const nonNegativeInteger = z.number().int().nonnegative();
-const nullableNonEmptyString = nonEmptyString.nullish();
-const timestampSchema = z.string().datetime({ offset: true });
+const optionalIdentifier = identifierString.optional();
+const timestampSchema = z.string().datetime({ offset: false });
 const semverSchema = z
   .string()
-  .regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/);
+  .regex(
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/,
+  );
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const jsonObjectSchema = z.record(z.string(), z.json());
 
@@ -39,21 +42,21 @@ export const eventStatusSchema = z.enum([
 
 export const componentRefSchema = z
   .object({
-    name: nonEmptyString,
-    instance: nonEmptyString,
+    name: contractString,
+    instance: contractString,
   })
   .strict();
 
 export const operationRefSchema = z
   .object({
-    name: nonEmptyString,
+    name: contractString,
     kind: operationKindSchema,
   })
   .strict();
 
 export const systemPackRefSchema = z
   .object({
-    id: nonEmptyString,
+    id: identifierString,
     version: semverSchema,
     interface_version: z.literal("1.0"),
   })
@@ -61,7 +64,7 @@ export const systemPackRefSchema = z
 
 export const failureOracleRefSchema = z
   .object({
-    id: nonEmptyString,
+    id: identifierString,
     version: semverSchema,
   })
   .strict();
@@ -70,28 +73,28 @@ const eventAttributesSchema = z
   .object({
     configured_latency_ms: nonNegativeInteger.optional(),
     checkout_timeout_ms: z.number().int().min(1).optional(),
-    effect_id: nonEmptyString.optional(),
+    effect_id: identifierString.optional(),
     effect_committed: z.boolean().optional(),
-    dependency_name: nonEmptyString.optional(),
+    dependency_name: contractString.optional(),
   })
   .strict();
 
 export const executionEventSchema = z
   .object({
     schema_version: z.literal("1.0"),
-    event_id: nonEmptyString,
-    execution_id: nonEmptyString,
-    trace_id: nonEmptyString,
-    parent_event_id: nonEmptyString.nullish(),
-    replay_run_id: nonEmptyString.nullish(),
+    event_id: identifierString,
+    execution_id: identifierString,
+    trace_id: identifierString,
+    parent_event_id: identifierString.optional(),
+    replay_run_id: identifierString.optional(),
     component: componentRefSchema,
     operation: operationRefSchema,
     event_type: eventTypeSchema,
     attempt: z.number().int().min(1),
-    logical_operation_id: nonEmptyString,
-    occurred_at: z.string().datetime({ offset: true }),
+    logical_operation_id: identifierString,
+    occurred_at: timestampSchema,
     sequence: nonNegativeInteger,
-    duration_ms: nonNegativeInteger.nullish(),
+    duration_ms: nonNegativeInteger.optional(),
     status: eventStatusSchema,
     attributes: eventAttributesSchema,
   })
@@ -117,14 +120,14 @@ export const validationIssueSchema = z
   .object({
     code: errorCodeSchema,
     path: z.string(),
-    message: nonEmptyString,
+    message: contractString,
   })
   .strict();
 
 export const runErrorSchema = z
   .object({
     code: errorCodeSchema,
-    message: nonEmptyString,
+    message: contractString,
     retryable: z.boolean(),
     details: jsonObjectSchema,
   })
@@ -135,17 +138,17 @@ export const incidentStatusSchema = z.enum(["DETECTED", "READY", "BLOCKED"]);
 export const incidentSchema = z
   .object({
     schema_version: z.literal("1.0"),
-    incident_id: nonEmptyString,
+    incident_id: identifierString,
     status: incidentStatusSchema,
-    block_reason: validationIssueSchema.nullish(),
+    block_reason: validationIssueSchema.optional(),
     failure_oracle: failureOracleRefSchema,
     system_pack: systemPackRefSchema,
-    trace_id: nonEmptyString,
-    execution_id: nonEmptyString,
+    trace_id: identifierString,
+    execution_id: identifierString,
     detected_at: timestampSchema,
-    summary: nonEmptyString,
-    evidence_event_ids: z.array(nonEmptyString).min(1),
-    graph_id: nullableNonEmptyString,
+    summary: contractString,
+    evidence_event_ids: z.array(identifierString).min(1),
+    graph_id: optionalIdentifier,
     sanitization_status: z.enum(["PASS", "FAIL"]),
   })
   .strict()
@@ -172,16 +175,16 @@ export const graphEdgeTypeSchema = z.enum([
 
 const graphNodeSchema = z
   .object({
-    event_id: nonEmptyString,
+    event_id: identifierString,
     timeline_index: nonNegativeInteger,
   })
   .strict();
 
 const graphEdgeSchema = z
   .object({
-    edge_id: nonEmptyString,
-    from_event_id: nonEmptyString,
-    to_event_id: nonEmptyString,
+    edge_id: identifierString,
+    from_event_id: identifierString,
+    to_event_id: identifierString,
     type: graphEdgeTypeSchema,
   })
   .strict()
@@ -192,8 +195,8 @@ const graphEdgeSchema = z
 export const executionGraphSchema = z
   .object({
     schema_version: z.literal("1.0"),
-    graph_id: nonEmptyString,
-    incident_id: nonEmptyString,
+    graph_id: identifierString,
+    incident_id: identifierString,
     ordering_policy_version: z.literal("1.0"),
     nodes: z.array(graphNodeSchema),
     edges: z.array(graphEdgeSchema),
@@ -201,6 +204,9 @@ export const executionGraphSchema = z
   .strict()
   .superRefine((graph, context) => {
     const eventIds = new Set(graph.nodes.map((node) => node.event_id));
+    const timelineIndexByEventId = new Map(
+      graph.nodes.map((node) => [node.event_id, node.timeline_index]),
+    );
     const timelineIndexes = new Set<number>();
 
     graph.nodes.forEach((node, index) => {
@@ -217,6 +223,21 @@ export const executionGraphSchema = z
     graph.edges.forEach((edge, index) => {
       if (!eventIds.has(edge.from_event_id) || !eventIds.has(edge.to_event_id)) {
         context.addIssue({ code: "custom", message: "Graph edge references a missing node", path: ["edges", index] });
+      }
+
+      const fromIndex = timelineIndexByEventId.get(edge.from_event_id);
+      const toIndex = timelineIndexByEventId.get(edge.to_event_id);
+      if (
+        edge.type !== "TEMPORAL" &&
+        fromIndex !== undefined &&
+        toIndex !== undefined &&
+        fromIndex >= toIndex
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "Hard ordering edges must move forward in timeline order",
+          path: ["edges", index],
+        });
       }
     });
   });
@@ -240,8 +261,8 @@ export const oracleResultSchema = z
     oracle: failureOracleRefSchema,
     matched: z.boolean(),
     effect_summary: effectSummarySchema,
-    required_evidence_event_ids: z.array(nonEmptyString),
-    explanation: nonEmptyString,
+    required_evidence_event_ids: z.array(identifierString),
+    explanation: contractString,
   })
   .strict();
 
@@ -259,19 +280,16 @@ export const interventionSpecSchema = z
     type: z.literal("PAYMENT_LATENCY"),
     value_type: z.literal("INTEGER"),
     unit: z.literal("ms"),
-    minimum: nonNegativeInteger,
-    maximum: nonNegativeInteger,
+    minimum: z.literal(0),
+    maximum: z.literal(5000),
   })
-  .strict()
-  .refine((specification) => specification.minimum <= specification.maximum, {
-    message: "minimum must not exceed maximum",
-  });
+  .strict();
 
 const stateFixtureSchema = z
   .object({
-    fixture_id: nonEmptyString,
+    fixture_id: identifierString,
     kind: z.literal("POSTGRES_ROWSET"),
-    content_ref: nonEmptyString,
+    content_ref: contractString,
     content_digest: sha256Schema,
     sanitization_status: z.literal("PASS"),
     reset_strategy: z.literal("TRUNCATE_AND_LOAD"),
@@ -280,7 +298,7 @@ const stateFixtureSchema = z
 
 const dependencyFixtureSchema = z
   .object({
-    fixture_id: nonEmptyString,
+    fixture_id: identifierString,
     dependency: z.literal("payment_simulator"),
     request_match: jsonObjectSchema,
     response: jsonObjectSchema,
@@ -293,13 +311,13 @@ const dependencyFixtureSchema = z
 export const replayCapsuleSchema = z
   .object({
     schema_version: z.literal("1.0"),
-    capsule_id: nonEmptyString,
+    capsule_id: identifierString,
     created_at: timestampSchema,
     source: z
       .object({
-        incident_id: nonEmptyString,
-        trace_id: nonEmptyString,
-        execution_id: nonEmptyString,
+        incident_id: identifierString,
+        trace_id: identifierString,
+        execution_id: identifierString,
         capture_environment: z.literal("DEMO"),
         captured_at: timestampSchema,
       })
@@ -311,8 +329,8 @@ export const replayCapsuleSchema = z
         sanitized_headers: z.record(z.string(), z.string()),
       })
       .strict(),
-    event_ids: z.array(nonEmptyString).min(1),
-    graph_id: nonEmptyString,
+    event_ids: z.array(identifierString).min(1),
+    graph_id: identifierString,
     state_fixtures: z.array(stateFixtureSchema),
     dependency_fixtures: z.array(dependencyFixtureSchema),
     timing_policy: z
@@ -330,7 +348,7 @@ export const replayCapsuleSchema = z
           z.literal("payment"),
           z.literal("ledger"),
         ]),
-        fixture_load_order: z.array(nonEmptyString),
+        fixture_load_order: z.array(identifierString),
         reset_strategy: z.literal("GOLDEN_RESET_V1"),
       })
       .strict(),
@@ -352,8 +370,8 @@ export const replayCapsuleSchema = z
       .object({
         policy_version: z.literal("1.0"),
         sanitization_status: z.literal("PASS"),
-        blocked_destinations: z.array(nonEmptyString).min(1),
-        allowed_destinations: z.array(nonEmptyString),
+        blocked_destinations: z.array(contractString).min(1),
+        allowed_destinations: z.array(contractString),
         credential_profile: z.literal("replay-only"),
       })
       .strict(),
@@ -364,13 +382,34 @@ export const replayCapsuleSchema = z
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  .superRefine((capsule, context) => {
+    const fixtureIds = [
+      ...capsule.state_fixtures.map((fixture) => fixture.fixture_id),
+      ...capsule.dependency_fixtures.map((fixture) => fixture.fixture_id),
+    ];
+    const fixtureIdSet = new Set(fixtureIds);
+    const loadOrderSet = new Set(capsule.replay_plan.fixture_load_order);
+
+    if (
+      fixtureIdSet.size !== fixtureIds.length ||
+      loadOrderSet.size !== capsule.replay_plan.fixture_load_order.length ||
+      fixtureIdSet.size !== loadOrderSet.size ||
+      [...fixtureIdSet].some((fixtureId) => !loadOrderSet.has(fixtureId))
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "fixture_load_order must reference every capsule fixture exactly once",
+        path: ["replay_plan", "fixture_load_order"],
+      });
+    }
+  });
 
 export const dependencyInteractionSchema = z
   .object({
-    dependency: nonEmptyString,
-    destination: nonEmptyString,
-    operation: nonEmptyString,
+    dependency: contractString,
+    destination: contractString,
+    operation: contractString,
     result: z.enum(["SIMULATED", "ALLOWED", "DENIED"]),
   })
   .strict();
@@ -379,10 +418,10 @@ export const isolationEvidenceSchema = z
   .object({
     policy_version: z.literal("1.0"),
     verdict: z.enum(["PASS", "FAIL"]),
-    runtime_namespace: nonEmptyString,
+    runtime_namespace: contractString,
     network_policy: z.enum(["PASS", "FAIL"]),
     credential_profile: z.literal("replay-only"),
-    datastore_destinations: z.array(nonEmptyString),
+    datastore_destinations: z.array(contractString),
     simulator_interactions: z.array(dependencyInteractionSchema),
     denied_interactions: z.array(dependencyInteractionSchema),
     teardown_result: z.enum(["PASS", "FAIL"]),
@@ -392,7 +431,8 @@ export const isolationEvidenceSchema = z
     const shouldFail =
       evidence.network_policy === "FAIL" ||
       evidence.teardown_result === "FAIL" ||
-      evidence.denied_interactions.length > 0;
+      evidence.denied_interactions.length > 0 ||
+      evidence.simulator_interactions.some((interaction) => interaction.result === "DENIED");
     if (shouldFail && evidence.verdict !== "FAIL") {
       context.addIssue({ code: "custom", message: "Isolation violations require verdict FAIL", path: ["verdict"] });
     }
@@ -418,23 +458,23 @@ export const replayOutcomeSchema = z.enum([
 export const replayRunSchema = z
   .object({
     schema_version: z.literal("1.0"),
-    run_id: nonEmptyString,
-    execution_id: nonEmptyString,
-    capsule_id: nonEmptyString,
+    run_id: identifierString,
+    execution_id: identifierString,
+    capsule_id: identifierString,
     capsule_hash: sha256Schema,
     run_type: z.enum(["BASELINE", "WHAT_IF"]),
-    baseline_run_id: nullableNonEmptyString,
-    intervention: interventionSchema.nullish(),
+    baseline_run_id: optionalIdentifier,
+    intervention: interventionSchema.optional(),
     trial_number: z.number().int().min(1),
     status: replayRunStatusSchema,
-    outcome: replayOutcomeSchema.nullish(),
-    started_at: timestampSchema.nullish(),
-    completed_at: timestampSchema.nullish(),
-    observed_event_ids: z.array(nonEmptyString),
-    effect_summary: effectSummarySchema.nullish(),
-    failure_oracle_result: oracleResultSchema.nullish(),
-    isolation_evidence: isolationEvidenceSchema.nullish(),
-    error: runErrorSchema.nullish(),
+    outcome: replayOutcomeSchema.optional(),
+    started_at: timestampSchema.optional(),
+    completed_at: timestampSchema.optional(),
+    observed_event_ids: z.array(identifierString),
+    effect_summary: effectSummarySchema.optional(),
+    failure_oracle_result: oracleResultSchema.optional(),
+    isolation_evidence: isolationEvidenceSchema.optional(),
+    error: runErrorSchema.optional(),
   })
   .strict()
   .superRefine((run, context) => {
@@ -444,16 +484,34 @@ export const replayRunSchema = z
     }
 
     if (run.status === "COMPLETED") {
-      if (!run.outcome || !run.effect_summary || !run.failure_oracle_result || run.isolation_evidence?.verdict !== "PASS") {
+      if (
+        !run.started_at ||
+        !run.outcome ||
+        !run.effect_summary ||
+        !run.failure_oracle_result ||
+        run.isolation_evidence?.verdict !== "PASS"
+      ) {
         context.addIssue({ code: "custom", message: "COMPLETED runs require outcome, evidence, and passing isolation" });
       }
-    } else if (run.outcome) {
+    } else if (run.outcome !== undefined) {
       context.addIssue({ code: "custom", message: "Only COMPLETED runs may include outcome", path: ["outcome"] });
     }
 
     const requiresError = run.status === "FAILED" || run.status === "BLOCKED";
     if (requiresError !== Boolean(run.error)) {
       context.addIssue({ code: "custom", message: "FAILED and BLOCKED runs require error; other statuses forbid it" });
+    }
+
+    if (
+      run.status === "BLOCKED" &&
+      (run.error?.code === "ISOLATION_VIOLATION" || run.error?.code === "DESTINATION_BLOCKED") &&
+      !run.isolation_evidence
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Isolation-related BLOCKED runs require isolation_evidence",
+        path: ["isolation_evidence"],
+      });
     }
 
     if (run.run_type === "BASELINE") {
@@ -471,20 +529,42 @@ export const replayRunSchema = z
         context.addIssue({ code: "custom", message: "Outcome is not valid for a WHAT_IF run", path: ["outcome"] });
       }
     }
+
+    const oracleMatched = run.failure_oracle_result?.matched;
+    if (
+      (run.outcome === "REPRODUCED" || run.outcome === "UNCHANGED") &&
+      oracleMatched !== true
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: `${run.outcome} requires a matching failure oracle`,
+        path: ["failure_oracle_result", "matched"],
+      });
+    }
+    if (
+      (run.outcome === "NOT_REPRODUCED" || run.outcome === "MITIGATED") &&
+      oracleMatched !== false
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: `${run.outcome} requires a non-matching failure oracle`,
+        path: ["failure_oracle_result", "matched"],
+      });
+    }
   });
 
 const eventAlignmentSchema = z
   .object({
-    baseline_event_id: nonEmptyString,
-    comparison_event_id: nonEmptyString,
+    baseline_event_id: identifierString,
+    comparison_event_id: identifierString,
   })
   .strict();
 
 const eventChangeSchema = z
   .object({
-    baseline_event_id: nonEmptyString,
-    comparison_event_id: nonEmptyString,
-    field: nonEmptyString,
+    baseline_event_id: identifierString,
+    comparison_event_id: identifierString,
+    field: contractString,
     baseline_value: z.json(),
     comparison_value: z.json(),
   })
@@ -492,9 +572,9 @@ const eventChangeSchema = z
 
 const firstDivergenceSchema = z
   .object({
-    baseline_event_id: nullableNonEmptyString,
-    comparison_event_id: nullableNonEmptyString,
-    rule: nonEmptyString,
+    baseline_event_id: optionalIdentifier,
+    comparison_event_id: optionalIdentifier,
+    rule: contractString,
     baseline_value: z.json(),
     comparison_value: z.json(),
     baseline_timeline_index: nonNegativeInteger,
@@ -505,25 +585,55 @@ const firstDivergenceSchema = z
 export const replayDiffSchema = z
   .object({
     schema_version: z.literal("1.0"),
-    diff_id: nonEmptyString,
-    baseline_run_id: nonEmptyString,
-    comparison_run_id: nonEmptyString,
+    diff_id: identifierString,
+    baseline_run_id: identifierString,
+    comparison_run_id: identifierString,
     alignment_version: z.literal("1.0"),
     intervention: interventionSchema,
     baseline_oracle_result: oracleResultSchema,
     comparison_oracle_result: oracleResultSchema,
     matched_events: z.array(eventAlignmentSchema),
-    added_event_ids: z.array(nonEmptyString),
-    removed_event_ids: z.array(nonEmptyString),
+    added_event_ids: z.array(identifierString),
+    removed_event_ids: z.array(identifierString),
     changed_events: z.array(eventChangeSchema),
-    first_meaningful_divergence: firstDivergenceSchema.nullish(),
+    first_meaningful_divergence: firstDivergenceSchema.optional(),
     baseline_effect_summary: effectSummarySchema,
     comparison_effect_summary: effectSummarySchema,
     effect_delta: effectDeltaSchema,
-    evidence_summary: nonEmptyString,
-    limitations: z.array(nonEmptyString),
+    evidence_summary: contractString,
+    limitations: z.array(contractString),
   })
-  .strict();
+  .strict()
+  .superRefine((diff, context) => {
+    if (!diff.baseline_oracle_result.matched) {
+      context.addIssue({
+        code: "custom",
+        message: "ReplayDiff requires a reproduced baseline oracle result",
+        path: ["baseline_oracle_result", "matched"],
+      });
+    }
+
+    const expectedPaymentDelta =
+      diff.comparison_effect_summary.payment_attempt_count -
+      diff.baseline_effect_summary.payment_attempt_count;
+    const expectedLedgerDelta =
+      diff.comparison_effect_summary.ledger_commit_count -
+      diff.baseline_effect_summary.ledger_commit_count;
+    if (diff.effect_delta.payment_attempt_count !== expectedPaymentDelta) {
+      context.addIssue({
+        code: "custom",
+        message: "payment_attempt_count delta must be comparison minus baseline",
+        path: ["effect_delta", "payment_attempt_count"],
+      });
+    }
+    if (diff.effect_delta.ledger_commit_count !== expectedLedgerDelta) {
+      context.addIssue({
+        code: "custom",
+        message: "ledger_commit_count delta must be comparison minus baseline",
+        path: ["effect_delta", "ledger_commit_count"],
+      });
+    }
+  });
 
 export const resetRequestSchema = z
   .object({ scenario_id: z.literal("checkout_duplicate_effect") })
@@ -532,7 +642,7 @@ export const resetRequestSchema = z
 export const resetResultSchema = z
   .object({
     schema_version: z.literal("1.0"),
-    reset_id: nonEmptyString,
+    reset_id: identifierString,
     status: z.enum(["COMPLETED", "FAILED"]),
     cleared_incident_count: nonNegativeInteger,
     cleared_run_count: nonNegativeInteger,
@@ -541,7 +651,7 @@ export const resetResultSchema = z
     configured_latency_ms: z.literal(350),
     deduplication_enabled: z.literal(false),
     next_logical_operation_id: z.literal("checkout-8271"),
-    error: runErrorSchema.nullish(),
+    error: runErrorSchema.optional(),
   })
   .strict()
   .superRefine((result, context) => {
@@ -551,20 +661,20 @@ export const resetResultSchema = z
   });
 
 export const acceptedEventResponseSchema = z
-  .object({ event_id: nonEmptyString, status: z.literal("ACCEPTED") })
+  .object({ event_id: identifierString, status: z.literal("ACCEPTED") })
   .strict();
 
 export const incidentListResponseSchema = z
   .object({
     items: z.array(incidentSchema),
-    next_cursor: nullableNonEmptyString,
+    next_cursor: optionalIdentifier,
   })
   .strict();
 
 export const incidentListQuerySchema = z
   .object({
-    status: incidentStatusSchema.nullish(),
-    cursor: nullableNonEmptyString,
+    status: incidentStatusSchema.optional(),
+    cursor: optionalIdentifier,
     limit: z.number().int().min(1).max(100).default(20),
   })
   .strict();
@@ -575,13 +685,30 @@ export const incidentDetailResponseSchema = z
     graph: executionGraphSchema,
     events: z.array(executionEventSchema),
   })
-  .strict();
+  .strict()
+  .superRefine((detail, context) => {
+    const timelineEventIds = [...detail.graph.nodes]
+      .sort((left, right) => left.timeline_index - right.timeline_index)
+      .map((node) => node.event_id);
+    const responseEventIds = detail.events.map((event) => event.event_id);
+
+    if (
+      timelineEventIds.length !== responseEventIds.length ||
+      timelineEventIds.some((eventId, index) => eventId !== responseEventIds[index])
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Incident events must match graph nodes in timeline order",
+        path: ["events"],
+      });
+    }
+  });
 
 export const createRunRequestSchema = z
   .object({
     run_type: z.enum(["BASELINE", "WHAT_IF"]),
-    baseline_run_id: nullableNonEmptyString,
-    intervention: interventionSchema.nullish(),
+    baseline_run_id: optionalIdentifier,
+    intervention: interventionSchema.optional(),
   })
   .strict()
   .superRefine((request, context) => {
@@ -595,8 +722,8 @@ export const createRunRequestSchema = z
 
 export const createDiffRequestSchema = z
   .object({
-    baseline_run_id: nonEmptyString,
-    comparison_run_id: nonEmptyString,
+    baseline_run_id: identifierString,
+    comparison_run_id: identifierString,
   })
   .strict();
 

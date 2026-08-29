@@ -34,6 +34,18 @@ export const capturedEvent = {
   attributes: { configured_latency_ms: 350 },
 } as const;
 
+export const retryEvent = {
+  ...capturedEvent,
+  event_id: "evt-retry",
+  component: { name: "checkout", instance: "checkout-1" },
+  operation: { name: "retry-payment", kind: "CONTROL" },
+  event_type: "RETRY",
+  occurred_at: "2026-08-29T10:32:01.205Z",
+  sequence: 2,
+  status: "SUCCESS",
+  attributes: {},
+} as const;
+
 export const graph = {
   schema_version: "1.0",
   graph_id: "graph-8271",

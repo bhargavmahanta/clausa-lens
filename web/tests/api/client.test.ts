@@ -8,6 +8,7 @@ import {
   incident,
   replayDiff,
   resetResult,
+  retryEvent,
 } from "../fixtures/golden-contracts";
 
 type FetchCall = {
@@ -74,13 +75,12 @@ describe("CausaLens API client", () => {
       if (url.pathname === "/v1/events") return Response.json({ event_id: capturedEvent.event_id, status: "ACCEPTED" }, { status: 202 });
       if (url.pathname === "/v1/incidents") return Response.json({ items: [incident] });
       if (url.pathname === "/v1/incidents/inc-8271") {
-        return Response.json({ incident, graph, events: [capturedEvent] });
+        return Response.json({ incident, graph, events: [capturedEvent, retryEvent] });
       }
       if (url.pathname === "/v1/incidents/inc-8271/capsules") return Response.json(capsule, { status: 201 });
       if (url.pathname === "/v1/capsules/cap-8271/runs") return Response.json(baselineRun, { status: 202 });
-      if (url.pathname === "/v1/diffs" || url.pathname === "/v1/diffs/diff-8271") {
-        return Response.json(replayDiff, { status: 201 });
-      }
+      if (url.pathname === "/v1/diffs") return Response.json(replayDiff, { status: 201 });
+      if (url.pathname === "/v1/diffs/diff-8271") return Response.json(replayDiff);
       if (url.pathname === "/v1/demo/reset") return Response.json(resetResult);
 
       return Response.json({ error: { code: "INTERNAL_FAILURE", message: "Unexpected path", retryable: false, details: {} } }, { status: 500 });
@@ -135,5 +135,19 @@ describe("CausaLens API client", () => {
       resource: "CreateRunRequest",
     });
     expect(networkCalls).toBe(0);
+  });
+
+  it("rejects a success response with the wrong endpoint status", async () => {
+    const { createCausaLensClient } = await import("../../src/lib/api");
+    const client = createCausaLensClient({
+      baseUrl: "http://core-api.test",
+      fetchImpl: async () => Response.json({ event_id: capturedEvent.event_id, status: "ACCEPTED" }),
+    });
+
+    await expect(client.acceptEvent(capturedEvent)).rejects.toMatchObject({
+      name: "ProtocolError",
+      expectedStatus: 202,
+      receivedStatus: 200,
+    });
   });
 });

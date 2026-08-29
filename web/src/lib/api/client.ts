@@ -64,6 +64,21 @@ export class CausaLensApiError extends Error {
   }
 }
 
+export class ProtocolError extends Error {
+  readonly expectedStatus: number;
+  readonly receivedStatus: number;
+
+  constructor(expectedStatus: number, receivedStatus: number, reason?: string) {
+    super(
+      reason ??
+        `The Core API returned HTTP ${receivedStatus}; this endpoint requires HTTP ${expectedStatus}.`,
+    );
+    this.name = "ProtocolError";
+    this.expectedStatus = expectedStatus;
+    this.receivedStatus = receivedStatus;
+  }
+}
+
 export class ContractValidationError extends Error {
   readonly resource: string;
   readonly issues: z.core.$ZodIssue[];
@@ -102,7 +117,12 @@ export function createCausaLensClient({
     return decoded.data;
   }
 
-  async function request<T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
+  async function request<T>(
+    path: string,
+    schema: z.ZodType<T>,
+    expectedStatus: number,
+    init?: RequestInit,
+  ): Promise<T> {
     const hasBody = init?.body !== undefined;
     const response = await fetchImpl(`${normalizedBaseUrl}${path}`, {
       ...init,
@@ -112,14 +132,37 @@ export function createCausaLensClient({
         ...init?.headers,
       },
     });
-    const body: unknown = await response.json();
-
     if (!response.ok) {
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        throw new ProtocolError(
+          expectedStatus,
+          response.status,
+          `The Core API returned a non-JSON error response with HTTP ${response.status}.`,
+        );
+      }
       const decodedError = apiErrorResponseSchema.safeParse(body);
       if (!decodedError.success) {
         throw new ContractDecodeError("APIErrorResponse", decodedError.error.issues);
       }
       throw new CausaLensApiError(response.status, decodedError.data.error);
+    }
+
+    if (response.status !== expectedStatus) {
+      throw new ProtocolError(expectedStatus, response.status);
+    }
+
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw new ProtocolError(
+        expectedStatus,
+        response.status,
+        `The Core API returned a non-JSON success response with HTTP ${response.status}.`,
+      );
     }
 
     const decoded = schema.safeParse(body);
@@ -133,10 +176,15 @@ export function createCausaLensClient({
   return {
     async acceptEvent(event) {
       const validatedEvent = validate("ExecutionEvent", executionEventSchema, event);
-      return request("/v1/events", acceptedEventResponseSchema.describe("AcceptedEventResponse"), {
-        method: "POST",
-        body: JSON.stringify(validatedEvent),
-      });
+      return request(
+        "/v1/events",
+        acceptedEventResponseSchema.describe("AcceptedEventResponse"),
+        202,
+        {
+          method: "POST",
+          body: JSON.stringify(validatedEvent),
+        },
+      );
     },
     async listIncidents(query = {}) {
       const validatedQuery = validate("IncidentListQuery", incidentListQuerySchema, query);
@@ -145,18 +193,24 @@ export function createCausaLensClient({
       if (validatedQuery.cursor) search.set("cursor", validatedQuery.cursor);
       if (query.limit !== undefined) search.set("limit", String(validatedQuery.limit));
       const suffix = search.size > 0 ? `?${search.toString()}` : "";
-      return request(`/v1/incidents${suffix}`, incidentListResponseSchema.describe("IncidentListResponse"));
+      return request(
+        `/v1/incidents${suffix}`,
+        incidentListResponseSchema.describe("IncidentListResponse"),
+        200,
+      );
     },
     async getIncident(incidentId) {
       return request(
         `/v1/incidents/${encodeURIComponent(incidentId)}`,
         incidentDetailResponseSchema.describe("IncidentDetailResponse"),
+        200,
       );
     },
     async createCapsule(incidentId) {
       return request(
         `/v1/incidents/${encodeURIComponent(incidentId)}/capsules`,
         replayCapsuleSchema.describe("ReplayCapsule"),
+        201,
         { method: "POST" },
       );
     },
@@ -165,28 +219,47 @@ export function createCausaLensClient({
       return request(
         `/v1/capsules/${encodeURIComponent(capsuleId)}/runs`,
         replayRunSchema.describe("ReplayRun"),
+        202,
         { method: "POST", body: JSON.stringify(validatedRequest) },
       );
     },
     async getRun(runId) {
-      return request(`/v1/runs/${encodeURIComponent(runId)}`, replayRunSchema.describe("ReplayRun"));
+      return request(
+        `/v1/runs/${encodeURIComponent(runId)}`,
+        replayRunSchema.describe("ReplayRun"),
+        200,
+      );
     },
     async createDiff(diffRequest) {
       const validatedRequest = validate("CreateDiffRequest", createDiffRequestSchema, diffRequest);
-      return request("/v1/diffs", replayDiffSchema.describe("ReplayDiff"), {
-        method: "POST",
-        body: JSON.stringify(validatedRequest),
-      });
+      return request(
+        "/v1/diffs",
+        replayDiffSchema.describe("ReplayDiff"),
+        201,
+        {
+          method: "POST",
+          body: JSON.stringify(validatedRequest),
+        },
+      );
     },
     async getDiff(diffId) {
-      return request(`/v1/diffs/${encodeURIComponent(diffId)}`, replayDiffSchema.describe("ReplayDiff"));
+      return request(
+        `/v1/diffs/${encodeURIComponent(diffId)}`,
+        replayDiffSchema.describe("ReplayDiff"),
+        200,
+      );
     },
     async resetDemo(resetRequest) {
       const validatedRequest = validate("ResetRequest", resetRequestSchema, resetRequest);
-      return request("/v1/demo/reset", resetResultSchema.describe("ResetResult"), {
-        method: "POST",
-        body: JSON.stringify(validatedRequest),
-      });
+      return request(
+        "/v1/demo/reset",
+        resetResultSchema.describe("ResetResult"),
+        200,
+        {
+          method: "POST",
+          body: JSON.stringify(validatedRequest),
+        },
+      );
     },
   };
 }
