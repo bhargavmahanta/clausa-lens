@@ -117,7 +117,7 @@ func TestReplayTracerBullet(t *testing.T) {
 
 	// Baseline run.
 	newRun(t, store, "run-base", contracts.RunTypeBaseline, "", nil, cap.Integrity.Digest)
-	baseRun, err := processRun(ctx, store, pack, runner, "run-base")
+	baseRun, err := processRun(ctx, store, pack, runner, "run-base", 5*time.Minute)
 	if err != nil {
 		t.Fatalf("baseline processRun: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestReplayTracerBullet(t *testing.T) {
 	// What-if run.
 	intervention := &contracts.Intervention{Type: contracts.InterventionPaymentLatency, From: 350, To: 50, Unit: contracts.InterventionUnitMilliseconds}
 	newRun(t, store, "run-whatif", contracts.RunTypeWhatIf, "run-base", intervention, cap.Integrity.Digest)
-	compRun, err := processRun(ctx, store, pack, runner, "run-whatif")
+	compRun, err := processRun(ctx, store, pack, runner, "run-whatif", 5*time.Minute)
 	if err != nil {
 		t.Fatalf("what-if processRun: %v", err)
 	}

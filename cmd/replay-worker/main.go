@@ -39,6 +39,9 @@ type workerStore interface {
 	GetCapsule(context.Context, string) (contracts.ReplayCapsule, error)
 	IngestEvent(context.Context, contracts.ExecutionEvent) error
 	ListRuns(context.Context, contracts.ReplayRunStatus) ([]contracts.ReplayRun, error)
+	ClaimRun(context.Context, string, time.Duration) (contracts.ReplayRun, error)
+	RenewLease(context.Context, string, time.Duration) error
+	ReclaimExpiredRuns(context.Context, time.Duration) ([]contracts.ReplayRun, error)
 }
 
 // runStore wraps workerStore in the replay.RunStore/EventLoader seams the
@@ -60,12 +63,12 @@ func (s runStore) EventsForRun(ctx context.Context, r contracts.ReplayRun) ([]co
 }
 
 // processRun advances one run from its current status to a terminal state and
-// persists the result. It executes the run's capsule through replay.Execute,
-// records the newly observed replay events, derives the outcome from the pack's
-// oracle, and finalizes with real isolation evidence. It refuses to run without
-// a pack or a runner, skips already-terminal runs, and never falls back to
-// source evidence.
-func processRun(ctx context.Context, store workerStore, pack contracts.SystemPack, runner replay.Runner, runID string) (contracts.ReplayRun, error) {
+// persists the result. It claims a run at CREATED atomically (locking it against
+// a concurrent worker), executes its capsule through replay.Execute, records the
+// newly observed replay events, derives the outcome from the pack's oracle, and
+// finalizes with real isolation evidence. It refuses to run without a pack or a
+// runner, skips already-terminal runs, and never falls back to source evidence.
+func processRun(ctx context.Context, store workerStore, pack contracts.SystemPack, runner replay.Runner, runID string, lease time.Duration) (contracts.ReplayRun, error) {
 	if pack == nil {
 		return contracts.ReplayRun{}, fmt.Errorf("replay worker: no System Pack wired (set PACK_IMPL)")
 	}
@@ -81,13 +84,15 @@ func processRun(ctx context.Context, store workerStore, pack contracts.SystemPac
 	}
 
 	if run.Status == contracts.ReplayRunCreated {
-		run, err = replay.AdvanceRun(ctx, runStore{store}, run, contracts.ReplayRunValidating)
+		claimed, err := store.ClaimRun(ctx, runID, lease)
 		if err != nil {
-			if isStaleRun(run.Status) {
-				return run, nil
+			// If another worker already claimed it, skip (never re-run).
+			if current, getErr := store.GetRun(ctx, runID); getErr == nil && current.Status != contracts.ReplayRunCreated {
+				return current, nil
 			}
 			return run, err
 		}
+		run = claimed
 	}
 	if run.Status == contracts.ReplayRunValidating {
 		if run.RunType == contracts.RunTypeWhatIf {
@@ -99,6 +104,9 @@ func processRun(ctx context.Context, store workerStore, pack contracts.SystemPac
 		if err != nil {
 			return run, err
 		}
+		// Runtime has started: renew the lease so a running execution is not
+		// mistaken for an orphan by a surviving worker.
+		_ = store.RenewLease(ctx, run.RunID, lease)
 	}
 	if run.Status != contracts.ReplayRunRunning {
 		return run, fmt.Errorf("replay worker: run %q is in unexpected status %s", run.RunID, run.Status)
@@ -222,8 +230,8 @@ func finalizeTerminal(ctx context.Context, store workerStore, run contracts.Repl
 	return target, nil
 }
 
-// runPoll cycles until ctx is cancelled: reclaim stranded runs, then claim and
-// process one CREATED run per iteration.
+// runPoll cycles until ctx is cancelled: reclaim expired/stranded runs, then
+// claim and process one CREATED run per iteration.
 func runPoll(ctx context.Context, store workerStore, pack contracts.SystemPack, runner replay.Runner, lease time.Duration, sleep time.Duration) {
 	for {
 		if ctx.Err() != nil {
@@ -241,19 +249,16 @@ func runPoll(ctx context.Context, store workerStore, pack contracts.SystemPack, 
 		}
 		claimed := false
 		for _, run := range runs {
-			outcome, err := processRun(ctx, store, pack, runner, run.RunID)
+			outcome, err := processRun(ctx, store, pack, runner, run.RunID, lease)
 			if err != nil {
-				if isStaleRun(outcome.Status) {
-					continue
-				}
 				log.Printf("replay worker: run %s: %v", run.RunID, err)
 				continue
 			}
 			if outcome.Status != contracts.ReplayRunCreated {
 				log.Printf("replay worker: run %s -> %s (outcome %s)", outcome.RunID, outcome.Status, outcome.Outcome)
-				claimed = true
-				break
 			}
+			claimed = true
+			break
 		}
 		if !claimed && sleep > 0 {
 			select {
@@ -265,47 +270,22 @@ func runPoll(ctx context.Context, store workerStore, pack contracts.SystemPack, 
 	}
 }
 
-// reclaimOrphans marks runs stranded in VALIDATING/RUNNING by a previous worker
-// as FAILED so they are never re-executed into duplicate side effects. To avoid
-// reclaiming a run a concurrent worker currently owns: a run whose runtime has
-// not started yet (VALIDATING has no StartedAt) is left alone under a positive
-// lease, and a RUNNING run is reclaimed only once its StartedAt lease expires.
-// With lease <= 0 every stranded run is reclaimed (operator-disabled lease).
+// reclaimOrphans fails runs stranded in VALIDATING/RUNNING whose lease expired
+// (or that never had one), so a crashed worker's run is recovered as FAILED and
+// never re-executed into duplicate side effects. Recovery is fail-only.
 func reclaimOrphans(ctx context.Context, store workerStore, lease time.Duration) ([]string, error) {
+	expired, err := store.ReclaimExpiredRuns(ctx, lease)
+	if err != nil {
+		return nil, err
+	}
 	var stranded []string
-	for _, status := range []contracts.ReplayRunStatus{contracts.ReplayRunValidating, contracts.ReplayRunRunning} {
-		runs, err := store.ListRuns(ctx, status)
-		if err != nil {
-			return nil, err
+	for _, run := range expired {
+		if _, err := replay.FinalizeOrphan(ctx, runStore{store}, run); err != nil {
+			continue
 		}
-		for _, run := range runs {
-			if run.StartedAt == "" && lease > 0 {
-				// No runtime started yet: either freshly claimed by a concurrent
-				// worker or still validating. Leave it rather than fail it.
-				continue
-			}
-			if lease > 0 && run.StartedAt != "" && !isPastLease(run.StartedAt, lease) {
-				continue
-			}
-			if _, err := replay.FinalizeOrphan(ctx, runStore{store}, run); err != nil {
-				continue
-			}
-			stranded = append(stranded, run.RunID)
-		}
+		stranded = append(stranded, run.RunID)
 	}
 	return stranded, nil
-}
-
-func isPastLease(startedAt string, lease time.Duration) bool {
-	started, err := time.Parse(time.RFC3339Nano, startedAt)
-	if err != nil {
-		return false
-	}
-	return time.Since(started) >= lease
-}
-
-func isStaleRun(status contracts.ReplayRunStatus) bool {
-	return status == contracts.ReplayRunFailed || status == contracts.ReplayRunBlocked || status == contracts.ReplayRunCompleted
 }
 
 func isTerminal(status contracts.ReplayRunStatus) bool {
@@ -326,7 +306,7 @@ func nowRFC3339() string {
 func main() {
 	runID := flag.String("run-id", "", "id of a single run to drive to a terminal state (optional; omit for polling mode)")
 	interval := flag.Duration("interval", 2*time.Second, "poll interval in polling mode")
-	lease := flag.Duration("lease", 5*time.Minute, "orphan lease time for reclaiming stranded runs")
+	lease := flag.Duration("lease", leaseDefault(), "orphan lease time for reclaiming stranded runs")
 	flag.Parse()
 
 	databaseURL := os.Getenv("DATABASE_URL")
@@ -349,7 +329,7 @@ func main() {
 	runner := newDemoRunner()
 
 	if *runID != "" {
-		result, err := processRun(ctx, store, pack, runner, *runID)
+		result, err := processRun(ctx, store, pack, runner, *runID, *lease)
 		if err != nil {
 			log.Fatalf("replay worker: %v", err)
 		}
@@ -357,4 +337,19 @@ func main() {
 		return
 	}
 	runPoll(ctx, store, pack, runner, *lease, *interval)
+}
+
+// leaseDefault returns the lease default from REPLAY_LEASE, falling back to the
+// frozen 5m default, so the Compose REPLAY_LEASE setting is actually honored.
+func leaseDefault() time.Duration {
+	raw := os.Getenv("REPLAY_LEASE")
+	if raw == "" {
+		return 5 * time.Minute
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		log.Printf("replay worker: invalid REPLAY_LEASE %q; using 5m", raw)
+		return 5 * time.Minute
+	}
+	return d
 }

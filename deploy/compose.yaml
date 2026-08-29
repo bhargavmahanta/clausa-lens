@@ -1,16 +1,20 @@
 # CausaLens P0 orchestration (Member 2 owned path).
 # Stack (frozen): PostgreSQL 15.18, Go 1.26.7 services, Docker Compose.
 #
-# Two deployment networks:
+# Three deployment networks:
 #   default  - the original (capture) system: demo gateway/checkout/payment/ledger
 #              emit canonical events to the Core API; used for E1 capture.
+#   db       - INTERNAL: PostgreSQL plus every component that needs it
+#              (core-api, replay-worker). The replay worker reaches PostgreSQL
+#              here WITHOUT joining the capture/default network, so it has no
+#              capture or public-network access.
 #   replay   - INTERNAL (default-deny, no public/production egress). The replay
-#              worker attaches only here. Replay execution is in-process against
-#              replay-only in-memory state (the checked-out System Pack services),
-#              so it reaches no production or public destination.
+#              worker attaches here as the replay boundary. Replay execution is
+#              in-process against replay-only in-memory state, so it reaches no
+#              production or public destination.
 #
-# The worker selects the System Pack via PACK_IMPL, and Core API does the same,
-# both resolving checkout_duplicate_effect in their own registration seam.
+# The Core API and the worker each select the System Pack via PACK_IMPL, both
+# resolving checkout_duplicate_effect in their own registration seam.
 services:
   postgres:
     image: postgres:15.18
@@ -18,8 +22,6 @@ services:
       POSTGRES_USER: causalens
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-causalens}
       POSTGRES_DB: causalens
-    ports:
-      - "55432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U causalens -d causalens"]
       interval: 5s
@@ -29,7 +31,7 @@ services:
       - causalens_pgdata:/var/lib/postgresql/data
       - ../db/migrations:/docker-entrypoint-initdb.d:ro
     networks:
-      - default
+      - db
 
   core-api:
     build:
@@ -45,16 +47,21 @@ services:
       - "8080:8080"
     networks:
       - default
+      - db
 
   # Demo capture system (Member 1 services). Images are provided by Member 1's
   # build; they emit canonical events to the Core API. These are the original
-  # (captured) execution, not the replay boundary.
+  # (captured) execution, not the replay boundary. demo-gateway is exposed to the
+  # host so the golden checkout can be triggered with a plain POST (no hidden
+  # commands).
   demo-gateway:
     image: ${GATEWAY_IMAGE:-causalens/demo-gateway:dev}
     environment:
       PORT: "8080"
       CHECKOUT_URL: http://demo-checkout:8081
       CORE_API_EVENTS_URL: http://core-api:8080/v1/events
+    ports:
+      - "${GATEWAY_PORT:-18080}:8080"
     depends_on:
       core-api:
         condition: service_started
@@ -88,10 +95,11 @@ services:
     networks:
       - default
 
-  # Replay worker: drives ReplayRuns to terminal states. It is attached only to
-  # the internal replay network (no production or public egress). It executes
-  # replays in-process using the checked-out System Pack services against
-  # replay-only in-memory state. PACK_IMPL resolves the same pack as Core API.
+  # Replay worker: drives ReplayRuns to terminal states. It reaches PostgreSQL
+  # only through the internal db network and is never on the capture/default
+  # network, so it has no capture or public-network access. Replay execution is
+  # in-process against replay-only in-memory state. REPLAY_LEASE is consumed as
+  # the orphan-claim lease (default 5m).
   replay-worker:
     build:
       context: ..
@@ -103,13 +111,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      core-api:
-        condition: service_started
     networks:
+      - db
       - replay
 
 networks:
   default: {}
+  # Internal: PostgreSQL plus its consumers. No host/public route.
+  db:
+    internal: true
   # Isolated replay-only network. An internal network has no route to the host
   # or public internet; only the worker is attached, so replay can never reach
   # production or uncontrolled destinations.

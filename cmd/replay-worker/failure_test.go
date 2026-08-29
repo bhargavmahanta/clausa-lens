@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/causalens/causalens/internal/contracts"
 	checkout "github.com/causalens/causalens/internal/systempack/checkout"
@@ -39,7 +40,7 @@ func TestWorkerWhatIfWithoutEligibleBaseline(t *testing.T) {
 	run := workerWhatIf("run-whatif")
 	store.runs["run-whatif"] = run
 
-	result, err := processRun(ctx, store, checkout.New(), newDemoRunner(), "run-whatif")
+	result, err := processRun(ctx, store, checkout.New(), newDemoRunner(), "run-whatif", 5*time.Minute)
 	if err != nil {
 		t.Fatalf("processRun: %v", err)
 	}
@@ -60,7 +61,7 @@ func TestWorkerBadCapsuleDigestBlock(t *testing.T) {
 	store := workerFailureStore(cap)
 	store.runs["run-base"] = workerBaseline("run-base")
 
-	result, err := processRun(ctx, store, checkout.New(), newDemoRunner(), "run-base")
+	result, err := processRun(ctx, store, checkout.New(), newDemoRunner(), "run-base", 5*time.Minute)
 	if err != nil {
 		t.Fatalf("processRun: %v", err)
 	}
@@ -74,7 +75,7 @@ func TestWorkerBadCapsuleDigestBlock(t *testing.T) {
 func TestWorkerMissingCapsuleFails(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeWorkerStore{runs: map[string]contracts.ReplayRun{"run-base": workerBaseline("run-base")}}
-	result, err := processRun(ctx, store, checkout.New(), newDemoRunner(), "run-base")
+	result, err := processRun(ctx, store, checkout.New(), newDemoRunner(), "run-base", 5*time.Minute)
 	if err != nil {
 		t.Fatalf("processRun: %v", err)
 	}

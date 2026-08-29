@@ -22,23 +22,25 @@ type Repository interface {
 }
 
 type Store struct {
-	mu        sync.RWMutex
-	events    map[string]contracts.ExecutionEvent
-	incidents map[string]contracts.Incident
-	graphs    map[string]contracts.ExecutionGraph
-	capsules  map[string]contracts.ReplayCapsule
-	runs      map[string]contracts.ReplayRun
-	diffs     map[string]contracts.ReplayDiff
+	mu         sync.RWMutex
+	events     map[string]contracts.ExecutionEvent
+	incidents  map[string]contracts.Incident
+	graphs     map[string]contracts.ExecutionGraph
+	capsules   map[string]contracts.ReplayCapsule
+	runs       map[string]contracts.ReplayRun
+	diffs      map[string]contracts.ReplayDiff
+	leaseUntil map[string]time.Time
 }
 
 func NewStore() *Store {
 	return &Store{
-		events:    map[string]contracts.ExecutionEvent{},
-		incidents: map[string]contracts.Incident{},
-		graphs:    map[string]contracts.ExecutionGraph{},
-		capsules:  map[string]contracts.ReplayCapsule{},
-		runs:      map[string]contracts.ReplayRun{},
-		diffs:     map[string]contracts.ReplayDiff{},
+		events:     map[string]contracts.ExecutionEvent{},
+		incidents:  map[string]contracts.Incident{},
+		graphs:     map[string]contracts.ExecutionGraph{},
+		capsules:   map[string]contracts.ReplayCapsule{},
+		runs:       map[string]contracts.ReplayRun{},
+		diffs:      map[string]contracts.ReplayDiff{},
+		leaseUntil: map[string]time.Time{},
 	}
 }
 

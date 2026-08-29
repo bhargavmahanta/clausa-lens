@@ -15,9 +15,60 @@ import (
 var workerDigest = strings.Repeat("a", 64)
 
 type fakeWorkerStore struct {
-	runs     map[string]contracts.ReplayRun
-	capsules map[string]contracts.ReplayCapsule
-	err      error
+	runs       map[string]contracts.ReplayRun
+	capsules   map[string]contracts.ReplayCapsule
+	leaseUntil map[string]time.Time
+	err        error
+}
+
+func (f *fakeWorkerStore) ClaimRun(_ context.Context, id string, lease time.Duration) (contracts.ReplayRun, error) {
+	if f.err != nil {
+		return contracts.ReplayRun{}, f.err
+	}
+	run, ok := f.runs[id]
+	if !ok {
+		return contracts.ReplayRun{}, errors.New("not found")
+	}
+	if run.Status != contracts.ReplayRunCreated {
+		return contracts.ReplayRun{}, errors.New("invalid lifecycle")
+	}
+	run.Status = contracts.ReplayRunValidating
+	f.runs[id] = run
+	if f.leaseUntil == nil {
+		f.leaseUntil = map[string]time.Time{}
+	}
+	f.leaseUntil[id] = time.Now().Add(lease)
+	return run, nil
+}
+func (f *fakeWorkerStore) RenewLease(_ context.Context, id string, lease time.Duration) error {
+	if f.err != nil {
+		return f.err
+	}
+	if _, ok := f.runs[id]; !ok {
+		return errors.New("not found")
+	}
+	if f.leaseUntil == nil {
+		f.leaseUntil = map[string]time.Time{}
+	}
+	f.leaseUntil[id] = time.Now().Add(lease)
+	return nil
+}
+func (f *fakeWorkerStore) ReclaimExpiredRuns(_ context.Context, _ time.Duration) ([]contracts.ReplayRun, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	now := time.Now()
+	var out []contracts.ReplayRun
+	for id, run := range f.runs {
+		if run.Status != contracts.ReplayRunValidating && run.Status != contracts.ReplayRunRunning {
+			continue
+		}
+		until, ok := f.leaseUntil[id]
+		if !ok || until.Before(now) {
+			out = append(out, run)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeWorkerStore) GetRun(_ context.Context, id string) (contracts.ReplayRun, error) {
@@ -105,21 +156,21 @@ func (okRunner) Run(context.Context, replay.RunnerConfig) (replay.RunResult, err
 
 func TestProcessRunRequiresPack(t *testing.T) {
 	store := &fakeWorkerStore{runs: map[string]contracts.ReplayRun{"run-base": workerBaseline("run-base")}}
-	if _, err := processRun(context.Background(), store, nil, okRunner{}, "run-base"); err == nil {
+	if _, err := processRun(context.Background(), store, nil, okRunner{}, "run-base", 5*time.Minute); err == nil {
 		t.Fatal("expected an error when no pack is wired")
 	}
 }
 
 func TestProcessRunRequiresRunner(t *testing.T) {
 	store := &fakeWorkerStore{runs: map[string]contracts.ReplayRun{"run-base": workerBaseline("run-base")}}
-	if _, err := processRun(context.Background(), store, packregistry.NewDevPack(), nil, "run-base"); err == nil {
+	if _, err := processRun(context.Background(), store, packregistry.NewDevPack(), nil, "run-base", 5*time.Minute); err == nil {
 		t.Fatal("expected an error when no runner is configured")
 	}
 }
 
 func TestProcessRunUnknownRunFails(t *testing.T) {
 	store := &fakeWorkerStore{runs: map[string]contracts.ReplayRun{}}
-	if _, err := processRun(context.Background(), store, packregistry.NewDevPack(), okRunner{}, "missing"); err == nil {
+	if _, err := processRun(context.Background(), store, packregistry.NewDevPack(), okRunner{}, "missing", 5*time.Minute); err == nil {
 		t.Fatal("expected an error for an unknown run")
 	}
 }
@@ -129,7 +180,7 @@ func TestProcessRunSkipsTerminal(t *testing.T) {
 	done.Status = contracts.ReplayRunCompleted
 	done.Outcome = contracts.ReplayOutcomeReproduced
 	store := &fakeWorkerStore{runs: map[string]contracts.ReplayRun{"run-base": done}}
-	result, err := processRun(context.Background(), store, packregistry.NewDevPack(), okRunner{}, "run-base")
+	result, err := processRun(context.Background(), store, packregistry.NewDevPack(), okRunner{}, "run-base", 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,12 +189,17 @@ func TestProcessRunSkipsTerminal(t *testing.T) {
 	}
 }
 
-func TestReclaimOrphansFailsStranded(t *testing.T) {
+// TestReclaimOrphansFailsExpiredLease verifies a run stranded mid-lifecycle with
+// an expired lease is recovered as FAILED (never re-run).
+func TestReclaimOrphansFailsExpiredLease(t *testing.T) {
 	run := workerBaseline("run-base")
 	run.Status = contracts.ReplayRunRunning
-	run.StartedAt = "2020-01-01T00:00:00Z"
-	store := &fakeWorkerStore{runs: map[string]contracts.ReplayRun{"run-base": run}}
-	reclaimed, err := reclaimOrphans(context.Background(), store, 0)
+	run.StartedAt = "2026-08-29T10:34:00Z"
+	store := &fakeWorkerStore{
+		runs:       map[string]contracts.ReplayRun{"run-base": run},
+		leaseUntil: map[string]time.Time{"run-base": time.Now().Add(-time.Hour)},
+	}
+	reclaimed, err := reclaimOrphans(context.Background(), store, 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,19 +212,22 @@ func TestReclaimOrphansFailsStranded(t *testing.T) {
 	}
 }
 
-// TestReclaimOrphansSkipsFreshClaim verifies a run a concurrent worker just
-// claimed (VALIDATING, no StartedAt) is never reclaimed under a positive lease,
-// so two workers cannot both fail/execute the same run.
-func TestReclaimOrphansSkipsFreshClaim(t *testing.T) {
+// TestReclaimOrphansKeepsActiveLease verifies a run claimed by a concurrent
+// worker (unexpired lease) is not reclaimed, so two workers never double-reclaim
+// an in-flight run.
+func TestReclaimOrphansKeepsActiveLease(t *testing.T) {
 	run := workerBaseline("run-base")
 	run.Status = contracts.ReplayRunValidating
-	store := &fakeWorkerStore{runs: map[string]contracts.ReplayRun{"run-base": run}}
+	store := &fakeWorkerStore{
+		runs:       map[string]contracts.ReplayRun{"run-base": run},
+		leaseUntil: map[string]time.Time{"run-base": time.Now().Add(time.Hour)},
+	}
 	reclaimed, err := reclaimOrphans(context.Background(), store, 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(reclaimed) != 0 {
-		t.Fatalf("fresh VALIDATING claim must not be reclaimed, got %d", len(reclaimed))
+		t.Fatalf("active lease must not be reclaimed, got %d", len(reclaimed))
 	}
 	if store.runs["run-base"].Status != contracts.ReplayRunValidating {
 		t.Fatalf("run should remain VALIDATING: %+v", store.runs["run-base"])

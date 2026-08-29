@@ -196,12 +196,16 @@ func Evaluate(ctx context.Context, pack contracts.SystemPack, run contracts.Repl
 	return completed, nil
 }
 
-// IsolationFor builds real, default-deny isolation evidence from what a runner
-// actually did: whether it interacted with the payment simulator and the
-// replay-only ledger datastore, the run's namespace, and whether teardown
-// succeeded. A runner must derive payment/ledger flags from the actions it
-// performed (e.g. the events it captured) so the evidence is never fabricated.
-func IsolationFor(runID, namespace string, paymentTouched, ledgerTouched bool, teardownOK bool) contracts.IsolationEvidence {
+// IsolationFor builds truthful, default-deny isolation evidence for an
+// in-process replay execution. Because the runner drives the System Pack's
+// services in-process against replay-only in-memory state, the runtime reached
+// NO external datastore and NO network simulator destination; the evidence
+// therefore records zero datastore destinations and zero simulator interactions
+// rather than fabricating a payment-simulator host or a replay datastore URL.
+// NetworkPolicy is PASS because no egress was attempted, and teardown reflects
+// the runner's actual reset/teardown result. The events themselves still prove
+// the simulated interactions happened; nothing is invented here.
+func IsolationFor(namespace string, teardownOK bool) contracts.IsolationEvidence {
 	teardown := contracts.VerdictPass
 	if !teardownOK {
 		teardown = contracts.VerdictFail
@@ -216,17 +220,6 @@ func IsolationFor(runID, namespace string, paymentTouched, ledgerTouched bool, t
 		SimulatorInteractions: []contracts.DependencyInteraction{},
 		DeniedInteractions:    []contracts.DependencyInteraction{},
 		TeardownResult:        teardown,
-	}
-	if paymentTouched {
-		evidence.SimulatorInteractions = append(evidence.SimulatorInteractions, contracts.DependencyInteraction{
-			Dependency:  "payment_simulator",
-			Destination: "http://payment-simulator:8080",
-			Operation:   "authorize",
-			Result:      contracts.InteractionSimulated,
-		})
-	}
-	if ledgerTouched {
-		evidence.DatastoreDestinations = append(evidence.DatastoreDestinations, "postgres://replay/ledger_run_"+namespace)
 	}
 	if teardown != contracts.VerdictPass {
 		evidence.Verdict = contracts.VerdictFail

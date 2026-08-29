@@ -67,7 +67,7 @@ func oneEvent(runID string) []contracts.ExecutionEvent {
 
 func validRunResult(runID string) RunResult {
 	events := oneEvent(runID)
-	return RunResult{Events: events, Isolation: IsolationFor(runID, "replay-run-"+runID, true, false, true)}
+	return RunResult{Events: events, Isolation: IsolationFor("replay-run-"+runID, true)}
 }
 
 func TestExecuteRejectsBadDigest(t *testing.T) {
@@ -101,7 +101,7 @@ func TestExecuteRejectsWhatIfWithoutBaseline(t *testing.T) {
 
 func TestExecuteRejectsNoReplayEvents(t *testing.T) {
 	capsule := makeCapsule(t)
-	result := RunResult{Isolation: IsolationFor("run-base", "replay-run-run-base", true, false, true)}
+	result := RunResult{Isolation: IsolationFor("replay-run-run-base", true)}
 	_, err := Execute(context.Background(), ExecutionConfig{Pack: packregistry.NewDevPack(), Capsule: capsule, Run: baselineRun("run-base"), Plan: capsule.ReplayPlan, Fixtures: contracts.FixtureSet{}, Runner: fakeRunner{result: result}, LatencyMS: 350})
 	if !errors.Is(err, ErrNoReplayEvents) {
 		t.Fatalf("expected ErrNoReplayEvents, got %v", err)
@@ -110,7 +110,7 @@ func TestExecuteRejectsNoReplayEvents(t *testing.T) {
 
 func TestExecuteRejectsTeardownFailure(t *testing.T) {
 	capsule := makeCapsule(t)
-	result := RunResult{Events: oneEvent("run-base"), Isolation: IsolationFor("run-base", "replay-run-run-base", true, false, false), Teardown: true}
+	result := RunResult{Events: oneEvent("run-base"), Isolation: IsolationFor("replay-run-run-base", false), Teardown: true}
 	_, err := Execute(context.Background(), ExecutionConfig{Pack: packregistry.NewDevPack(), Capsule: capsule, Run: baselineRun("run-base"), Plan: capsule.ReplayPlan, Fixtures: contracts.FixtureSet{}, Runner: fakeRunner{result: result}, LatencyMS: 350})
 	if !errors.Is(err, ErrTeardown) {
 		t.Fatalf("expected ErrTeardown, got %v", err)
@@ -121,7 +121,7 @@ func TestExecuteRejectsMissingReplayRunID(t *testing.T) {
 	capsule := makeCapsule(t)
 	events := oneEvent("run-base")
 	events[0].ReplayRunID = ""
-	result := RunResult{Events: events, Isolation: IsolationFor("run-base", "replay-run-run-base", true, false, true)}
+	result := RunResult{Events: events, Isolation: IsolationFor("replay-run-run-base", true)}
 	_, err := Execute(context.Background(), ExecutionConfig{Pack: packregistry.NewDevPack(), Capsule: capsule, Run: baselineRun("run-base"), Plan: capsule.ReplayPlan, Fixtures: contracts.FixtureSet{}, Runner: fakeRunner{result: result}, LatencyMS: 350})
 	if !errors.Is(err, ErrReplayRunID) {
 		t.Fatalf("expected ErrReplayRunID, got %v", err)
