@@ -1,67 +1,68 @@
 import { describe, expect, it } from "vitest";
 
-describe("overview carousel ring", () => {
-  it("places exactly one card in front for five workflow stages", async () => {
-    const { getCarouselPlacement, overviewCarouselStages } = await import(
+describe("overview carousel orbit", () => {
+  it("defines the four evidence objects in workflow order", async () => {
+    const { overviewCarouselStages } = await import(
       "../../src/features/overview/carousel"
     );
 
-    expect(overviewCarouselStages).toEqual(["capture", "trace", "replay", "diff", "overview"]);
-
-    for (const active of overviewCarouselStages) {
-      const placements = overviewCarouselStages.map((stage) =>
-        getCarouselPlacement(active, stage),
-      );
-      expect(placements.filter((placement) => placement === "front")).toHaveLength(1);
-      expect(placements.filter((placement) => placement === "behindLeft")).toHaveLength(1);
-      expect(placements.filter((placement) => placement === "behindRight")).toHaveLength(1);
-      expect(placements.filter((placement) => placement === "left")).toHaveLength(1);
-      expect(placements.filter((placement) => placement === "right")).toHaveLength(1);
-    }
+    expect(overviewCarouselStages).toEqual([
+      "incident",
+      "capsule",
+      "replay",
+      "diff",
+    ]);
   });
 
-  it("advances the ring deterministically for auto-rotation", async () => {
-    const { nextCarouselIndex, overviewCarouselStages } = await import(
+  it("places the selected stage at the front and its opposite behind", async () => {
+    const { getOrbitTransform, getStageTargetAngle } = await import(
+      "../../src/features/overview/carousel"
+    );
+    const angle = getStageTargetAngle(2, 4);
+    const selected = getOrbitTransform(2, angle, 4);
+    const opposite = getOrbitTransform(0, angle, 4);
+
+    expect(selected.frontness).toBeCloseTo(1, 5);
+    expect(selected.x).toBeCloseTo(0, 5);
+    expect(selected.z).toBeGreaterThan(opposite.z);
+    expect(selected.scale).toBeGreaterThan(opposite.scale);
+    expect(selected.blur).toBeLessThan(opposite.blur);
+  });
+
+  it("uses the shortest curved rotation across the wrap boundary", async () => {
+    const { getShortestOrbitDelta } = await import(
       "../../src/features/overview/carousel"
     );
 
-    expect(nextCarouselIndex(0)).toBe(1);
-    expect(nextCarouselIndex(3)).toBe(4);
-    expect(nextCarouselIndex(4)).toBe(0);
-
-    let index = 1;
-    const visited: number[] = [];
-    for (let step = 0; step < overviewCarouselStages.length; step += 1) {
-      visited.push(index);
-      index = nextCarouselIndex(index);
-    }
-    expect(index).toBe(1);
-    expect(visited).toEqual([1, 2, 3, 4, 0]);
+    expect(
+      getShortestOrbitDelta(Math.PI * 0.95, -Math.PI * 0.95),
+    ).toBeCloseTo(Math.PI * 0.1, 5);
+    expect(
+      getShortestOrbitDelta(-Math.PI * 0.95, Math.PI * 0.95),
+    ).toBeCloseTo(-Math.PI * 0.1, 5);
   });
 
-  it("derives the diagonal ring geometry from the relative position", async () => {
-    const { getCarouselTransform } = await import("../../src/features/overview/carousel");
+  it("changes position continuously between two orbit samples", async () => {
+    const { getOrbitTransform } = await import(
+      "../../src/features/overview/carousel"
+    );
+    const start = getOrbitTransform(1, 0, 4);
+    const middle = getOrbitTransform(1, Math.PI / 8, 4);
+    const end = getOrbitTransform(1, Math.PI / 4, 4);
 
-    const front = getCarouselTransform("front");
-    expect(front).toMatchObject({ x: "0%", y: "0%", z: 0, scale: 1, rotateY: 0 });
+    expect(middle.x).not.toBe(start.x);
+    expect(middle.x).not.toBe(end.x);
+    expect(middle.z).toBeGreaterThan(Math.min(start.z, end.z));
+    expect(middle.z).toBeLessThan(Math.max(start.z, end.z));
+  });
 
-    const left = getCarouselTransform("left");
-    expect(left.z).toBeLessThan(0);
-    expect(left.rotateY).toBeGreaterThan(0);
-    expect(left.scale).toBeLessThan(1);
+  it("identifies the nearest front stage throughout wrap-around", async () => {
+    const { getFocusedStageIndex, getStageTargetAngle } = await import(
+      "../../src/features/overview/carousel"
+    );
 
-    const right = getCarouselTransform("right");
-    expect(right.z).toBeLessThan(0);
-    expect(right.rotateY).toBeLessThan(0);
-    expect(right.scale).toBeLessThan(1);
-
-    const behind = getCarouselTransform("behindLeft");
-    expect(behind.z).toBeLessThan(left.z);
-    expect(behind.opacity).toBeLessThan(1);
-
-    expect(getCarouselTransform("behindRight")).toMatchObject({
-      z: behind.z,
-      opacity: behind.opacity,
-    });
+    for (let index = 0; index < 4; index += 1) {
+      expect(getFocusedStageIndex(getStageTargetAngle(index, 4), 4)).toBe(index);
+    }
   });
 });

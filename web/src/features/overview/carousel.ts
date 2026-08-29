@@ -1,69 +1,118 @@
 export const overviewCarouselStages = [
-  "capture",
-  "trace",
+  "incident",
+  "capsule",
   "replay",
   "diff",
-  "overview",
 ] as const;
 
 export type OverviewCarouselStage = (typeof overviewCarouselStages)[number];
 
-export type CarouselPlacement = "front" | "right" | "behindRight" | "behindLeft" | "left";
+export type OrbitGeometry = {
+  radiusX: number;
+  radiusY: number;
+  depth: number;
+  tilt: number;
+  minScale: number;
+  maxBlur: number;
+};
 
-const placementOrder: readonly CarouselPlacement[] = [
-  "front",
-  "right",
-  "behindRight",
-  "behindLeft",
-  "left",
-];
-
-export function getCarouselPlacement(
-  activeStage: OverviewCarouselStage,
-  stage: OverviewCarouselStage,
-): CarouselPlacement {
-  const activeIndex = overviewCarouselStages.indexOf(activeStage);
-  const stageIndex = overviewCarouselStages.indexOf(stage);
-  const relativeIndex =
-    (stageIndex - activeIndex + overviewCarouselStages.length) % overviewCarouselStages.length;
-
-  return placementOrder[relativeIndex] ?? "behindRight";
-}
-
-export function nextCarouselIndex(
-  current: number,
-  count: number = overviewCarouselStages.length,
-): number {
-  return (current + 1) % count;
-}
-
-export function previousCarouselIndex(
-  current: number,
-  count: number = overviewCarouselStages.length,
-): number {
-  return (current - 1 + count) % count;
-}
-
-export type CarouselTransform = {
-  x: string;
-  y: string;
+export type OrbitTransform = {
+  x: number;
+  y: number;
   z: number;
   scale: number;
   rotateX: number;
   rotateY: number;
   rotateZ: number;
   opacity: number;
+  blur: number;
   zIndex: number;
+  frontness: number;
 };
 
-const transforms: Record<CarouselPlacement, CarouselTransform> = {
-  front: { x: "0%", y: "0%", z: 0, scale: 1, rotateX: 0, rotateY: 0, rotateZ: 0, opacity: 1, zIndex: 5 },
-  right: { x: "64%", y: "-7%", z: -240, scale: 0.72, rotateX: 2, rotateY: -26, rotateZ: 4, opacity: 0.78, zIndex: 3 },
-  behindRight: { x: "26%", y: "-22%", z: -520, scale: 0.58, rotateX: 7, rotateY: -14, rotateZ: 6, opacity: 0.42, zIndex: 1 },
-  behindLeft: { x: "-26%", y: "-20%", z: -520, scale: 0.58, rotateX: 7, rotateY: 14, rotateZ: -6, opacity: 0.42, zIndex: 1 },
-  left: { x: "-64%", y: "8%", z: -240, scale: 0.72, rotateX: 1, rotateY: 26, rotateZ: -4, opacity: 0.78, zIndex: 4 },
+export const desktopOrbitGeometry: OrbitGeometry = {
+  radiusX: 520,
+  radiusY: 170,
+  depth: 520,
+  tilt: -0.14,
+  minScale: 0.56,
+  maxBlur: 4,
 };
 
-export function getCarouselTransform(placement: CarouselPlacement): CarouselTransform {
-  return transforms[placement];
+const fullTurn = Math.PI * 2;
+
+export function normalizeOrbitAngle(angle: number): number {
+  return ((angle + Math.PI) % fullTurn + fullTurn) % fullTurn - Math.PI;
+}
+
+export function getShortestOrbitDelta(
+  currentAngle: number,
+  targetAngle: number,
+): number {
+  return normalizeOrbitAngle(targetAngle - currentAngle);
+}
+
+export function getStageTargetAngle(
+  stageIndex: number,
+  count: number = overviewCarouselStages.length,
+): number {
+  return normalizeOrbitAngle(-(stageIndex * fullTurn) / count);
+}
+
+export function getFocusedStageIndex(
+  orbitAngle: number,
+  count: number = overviewCarouselStages.length,
+): number {
+  let focused = 0;
+  let closest = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < count; index += 1) {
+    const distance = Math.abs(
+      normalizeOrbitAngle(orbitAngle + (index * fullTurn) / count),
+    );
+    if (distance < closest) {
+      focused = index;
+      closest = distance;
+    }
+  }
+
+  return focused;
+}
+
+export function getOrbitTransform(
+  stageIndex: number,
+  orbitAngle: number,
+  count: number = overviewCarouselStages.length,
+  geometry: OrbitGeometry = desktopOrbitGeometry,
+): OrbitTransform {
+  const theta = normalizeOrbitAngle(
+    orbitAngle + (stageIndex * fullTurn) / count,
+  );
+  const rawX = Math.sin(theta) * geometry.radiusX;
+  const rawY = (1 - Math.cos(theta)) * geometry.radiusY;
+  const tiltCos = Math.cos(geometry.tilt);
+  const tiltSin = Math.sin(geometry.tilt);
+  const frontness = (Math.cos(theta) + 1) / 2;
+
+  return {
+    x: rawX * tiltCos - rawY * tiltSin,
+    y: rawX * tiltSin + rawY * tiltCos,
+    z: (Math.cos(theta) - 1) * geometry.depth,
+    scale: geometry.minScale + (1 - geometry.minScale) * frontness,
+    rotateX: (1 - frontness) * 8,
+    rotateY: Math.sin(theta) * -24,
+    rotateZ: Math.sin(theta) * 7,
+    opacity: 0.34 + frontness * 0.66,
+    blur: geometry.maxBlur * (1 - frontness),
+    zIndex: Math.round(frontness * 100),
+    frontness,
+  };
+}
+
+export function nextCarouselIndex(current: number, count: number): number {
+  return (current + 1) % count;
+}
+
+export function previousCarouselIndex(current: number, count: number): number {
+  return (current - 1 + count) % count;
 }
