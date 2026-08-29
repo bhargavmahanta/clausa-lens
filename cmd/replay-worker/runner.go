@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	checkoutsvc "github.com/causalens/causalens/cmd/demo-checkout/service"
@@ -19,9 +20,9 @@ import (
 // entrypoint or required component this runtime cannot execute.
 var errUnexpectedPlan = errors.New("replay worker: unsupported replay plan entrypoint or component")
 
-// replaySink is a replay-only capture sink that stamps replay_run_id on every
-// event emitted by the demo services and collects them for one run. It is
-// concurrency-safe because the demo checkout launches payment attempts in
+// replaySink is a replay-only capture sink that stamps replay_run_id and
+// namespaces event references on every event emitted by the demo services. It
+// is concurrency-safe because the demo checkout launches payment attempts in
 // goroutines. It records teardown failure if any emit fails.
 type replaySink struct {
 	mu       sync.Mutex
@@ -35,6 +36,10 @@ func (s *replaySink) Emit(_ context.Context, event contracts.ExecutionEvent) err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	event.ReplayRunID = s.runID
+	event.EventID = "evt-" + s.runID + "-" + strings.TrimPrefix(event.EventID, "evt-")
+	if event.ParentEventID != "" {
+		event.ParentEventID = "evt-" + s.runID + "-" + strings.TrimPrefix(event.ParentEventID, "evt-")
+	}
 	if err := event.Validate(); err != nil {
 		s.emitErr = err
 		return err

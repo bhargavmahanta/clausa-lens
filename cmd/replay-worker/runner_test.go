@@ -40,6 +40,58 @@ func runnerConfig() replay.RunnerConfig {
 	return replay.RunnerConfig{RunID: "run-base", Namespace: "replay-run-run-base", Plan: runnerPlan(), Fixtures: runnerFixtures(), LatencyMS: 350}
 }
 
+func TestRunnerNamespacesEventIDsByRunID(t *testing.T) {
+	result, err := newDemoRunner().Run(context.Background(), runnerConfig())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	foundEvent := false
+	foundParent := false
+	for _, event := range result.Events {
+		if event.EventID == "evt-run-base-gateway-1" {
+			foundEvent = true
+		}
+		if event.ParentEventID == "evt-run-base-gateway-1" {
+			foundParent = true
+		}
+	}
+	if !foundEvent {
+		t.Fatal("missing namespaced event ID evt-run-base-gateway-1")
+	}
+	if !foundParent {
+		t.Fatal("missing namespaced parent event ID evt-run-base-gateway-1")
+	}
+}
+
+func TestFreshRunnersProduceDisjointEventIDsForDifferentRuns(t *testing.T) {
+	firstCfg := runnerConfig()
+	firstCfg.RunID = "run-first"
+	firstCfg.Namespace = "replay-run-run-first"
+	first, err := newDemoRunner().Run(context.Background(), firstCfg)
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+
+	secondCfg := runnerConfig()
+	secondCfg.RunID = "run-second"
+	secondCfg.Namespace = "replay-run-run-second"
+	second, err := newDemoRunner().Run(context.Background(), secondCfg)
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+
+	firstIDs := make(map[string]bool, len(first.Events))
+	for _, event := range first.Events {
+		firstIDs[event.EventID] = true
+	}
+	for _, event := range second.Events {
+		if firstIDs[event.EventID] {
+			t.Errorf("fresh runners produced overlapping event ID %q", event.EventID)
+		}
+	}
+}
+
 // TestRunnerRejectsWrongEntrypoint verifies the runner consumes (and refuses to
 // ignore) the capsule replay plan's entrypoint.
 func TestRunnerRejectsWrongEntrypoint(t *testing.T) {

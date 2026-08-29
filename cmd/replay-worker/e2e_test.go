@@ -25,12 +25,45 @@ func srcEvent(id string, comp string, op string, kind contracts.OperationKind, e
 
 func goldenIncidentEvents() []contracts.ExecutionEvent {
 	return []contracts.ExecutionEvent{
-		srcEvent("evt-p1", "payment", "authorize", contracts.OperationDependency, contracts.EventStart, 1, 0, "2026-08-29T10:32:01.015Z", contracts.EventRunning, map[string]any{"configured_latency_ms": 350}),
+		srcEvent("evt-gateway-1", "payment", "authorize", contracts.OperationDependency, contracts.EventStart, 1, 0, "2026-08-29T10:32:01.015Z", contracts.EventRunning, map[string]any{"configured_latency_ms": 350}),
 		srcEvent("evt-p2", "payment", "authorize", contracts.OperationDependency, contracts.EventStart, 2, 1, "2026-08-29T10:32:01.210Z", contracts.EventRunning, map[string]any{"configured_latency_ms": 350}),
 		srcEvent("evt-timeout", "checkout", "checkout", contracts.OperationControl, contracts.EventTimeout, 1, 0, "2026-08-29T10:32:01.204Z", contracts.EventTimedOut, map[string]any{}),
 		srcEvent("evt-retry", "checkout", "checkout", contracts.OperationControl, contracts.EventRetry, 1, 1, "2026-08-29T10:32:01.205Z", contracts.EventRunning, map[string]any{}),
 		srcEvent("evt-l1", "ledger", "ledger.commit", contracts.OperationSideEffect, contracts.EventEffect, 1, 0, "2026-08-29T10:32:01.365Z", contracts.EventSuccess, map[string]any{"effect_id": "eff-1", "effect_committed": true}),
 		srcEvent("evt-l2", "ledger", "ledger.commit", contracts.OperationSideEffect, contracts.EventEffect, 2, 1, "2026-08-29T10:32:01.560Z", contracts.EventSuccess, map[string]any{"effect_id": "eff-2", "effect_committed": true}),
+	}
+}
+
+func TestFreshRunnerPersistsReplayEventsWithoutSourceIDCollisions(t *testing.T) {
+	ctx := context.Background()
+	store := core.NewStore()
+	_, cap := buildGoldenIncident(t, store)
+	newRun(t, store, "run-base", contracts.RunTypeBaseline, "", nil, cap.Integrity.Digest)
+
+	run, err := processRun(ctx, store, checkout.New(), newDemoRunner(), "run-base", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("processRun: %v", err)
+	}
+	if run.Status != contracts.ReplayRunCompleted || run.Outcome != contracts.ReplayOutcomeReproduced {
+		t.Fatalf("first baseline run: status=%s outcome=%s error=%+v", run.Status, run.Outcome, run.Error)
+	}
+
+	sourceIDs := make(map[string]bool, len(goldenIncidentEvents()))
+	for _, event := range goldenIncidentEvents() {
+		sourceIDs[event.EventID] = true
+	}
+	replayEvents := mustEventsForRun(t, store, run.RunID)
+	replayIDs := make(map[string]bool, len(replayEvents))
+	for _, event := range replayEvents {
+		if sourceIDs[event.EventID] {
+			t.Errorf("replay event ID %q collides with a source event", event.EventID)
+		}
+		replayIDs[event.EventID] = true
+	}
+	for _, event := range replayEvents {
+		if event.ParentEventID != "" && !replayIDs[event.ParentEventID] {
+			t.Errorf("replay event %q parent %q was not persisted in run %q", event.EventID, event.ParentEventID, run.RunID)
+		}
 	}
 }
 
