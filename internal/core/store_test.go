@@ -18,7 +18,7 @@ func TestStoreRejectsDuplicateEventIDs(t *testing.T) {
 
 func TestStorePersistsIncident(t *testing.T) {
 	s := NewStore()
-	i := contracts.Incident{SchemaVersion: "1.0", IncidentID: "inc-1", Status: "READY"}
+	i := contracts.Incident{SchemaVersion: "1.0", IncidentID: "inc-1", Status: "READY", GraphID: "g-1"}
 	g := contracts.ExecutionGraph{GraphID: "g-1", SchemaVersion: "1.0"}
 	if err := s.PutIncident(i, g); err != nil {
 		t.Fatal(err)
