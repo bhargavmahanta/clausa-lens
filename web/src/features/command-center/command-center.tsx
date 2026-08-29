@@ -224,7 +224,7 @@ export function CommandCenter() {
 
       <section className="reset-control" aria-labelledby="reset-control-title">
         <div><p className="panel-kicker">Deterministic scenario</p><h2 id="reset-control-title">Reset demo workflow</h2></div>
-        <button onClick={() => void confirmReset()} type="button">Reset demo workflow</button>
+        <button onClick={() => dispatch({ type: "resetConfirmationOpened" })} type="button">Reset demo workflow</button>
       </section>
       {state.reset.status === "confirming" || state.reset.status === "submitting" ? (
         <ResetDialog
