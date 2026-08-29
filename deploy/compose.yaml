@@ -1,0 +1,73 @@
+# CausaLens P0 orchestration (Member 2 owned path).
+# Stack (frozen): PostgreSQL 15.18, Go 1.26.7 services, Docker 29.3.1,
+# Docker Compose 5.1.1. Replay is default-deny; the replay runtime reaches only
+# the payment simulator and replay-postgres, never production or public egress.
+#
+# This is the MVP boundary: one Core API, one PostgreSQL, one replay worker,
+# the controlled payment simulator, and the demo system (Member 1 provides the
+# demo services and capture in owned paths; those are referenced here only when
+# present). It does not require Kafka, Redis, Kubernetes, or a graph database.
+
+services:
+  postgres:
+    image: postgres:15.18
+    environment:
+      POSTGRES_USER: causalens
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-causalens}
+      POSTGRES_DB: causalens
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U causalens -d causalens"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - causalens_pgdata:/var/lib/postgresql/data
+      - ../db/migrations:/docker-entrypoint-initdb.d:ro
+
+  core-api:
+    build:
+      context: ..
+      dockerfile: cmd/core-api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://causalens:${POSTGRES_PASSWORD:-causalens}@postgres:5432/causalens?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  # The isolated replay runtime. Member 1 supplies the demo/checkout pack;
+  # the worker and validator are Member 2 owned. Replay-only boundary: the
+  # worker can reach payment-simulator and replay-postgres only.
+  replay-worker:
+    build:
+      context: ..
+      dockerfile: cmd/replay-worker/Dockerfile
+    environment:
+      DATABASE_URL: postgres://causalens:${POSTGRES_PASSWORD:-causalens}@postgres:5432/causalens?sslmode=disable
+      REPLAY_NAMESPACE: ${REPLAY_NAMESPACE:-replay-run}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - default
+      - replay
+
+  payment-simulator:
+    image: ${PAYMENT_SIMULATOR_IMAGE:-causalens/payment-simulator:dev}
+    environment:
+      DEFAULT_LATENCY_MS: ${PAYMENT_LATENCY_MS:-350}
+    networks:
+      - replay
+
+networks:
+  default: {}
+  # Isolated replay-only network. No production or public egress is available
+  # on this network; only the replay worker and simulators are attached.
+  replay:
+    internal: true
+
+volumes:
+  causalens_pgdata:

@@ -231,6 +231,123 @@ func (r *PostgresRepository) GetDiff(ctx context.Context, id string) (contracts.
 	return getJSON[contracts.ReplayDiff](ctx, r.db, `SELECT payload FROM replay_diffs WHERE diff_id=$1`, id)
 }
 
+// ResetCounts reports how many incident and run rows a Reset cleared.
+type ResetCounts struct {
+	Incidents int
+	Runs      int
+}
+
+// Reset clears replay and capture state in foreign-key order and returns the
+// counts of cleared incidents and runs. It is used by the /demo/reset route.
+func (r *PostgresRepository) Reset(ctx context.Context) (ResetCounts, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ResetCounts{}, repositoryError(err)
+	}
+	defer tx.Rollback()
+	incidents, err := countRows(ctx, tx, `incidents`)
+	if err != nil {
+		return ResetCounts{}, err
+	}
+	runs, err := countRows(ctx, tx, `replay_runs`)
+	if err != nil {
+		return ResetCounts{}, err
+	}
+	for _, table := range []string{"replay_diffs", "replay_runs", "replay_capsules", "execution_graphs", "incidents", "execution_events"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table); err != nil {
+			return ResetCounts{}, repositoryError(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return ResetCounts{}, repositoryError(err)
+	}
+	return ResetCounts{Incidents: incidents, Runs: runs}, nil
+}
+
+func countRows(ctx context.Context, q rowQueryer, table string) (int, error) {
+	var n int
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM `+table).Scan(&n); err != nil {
+		return 0, repositoryError(err)
+	}
+	return n, nil
+}
+
+// EventsForRun loads a run's replayed events (matching replay_run_id) or its
+// capsule's event_ids when none are recorded, in a stable chronological order.
+func (r *PostgresRepository) EventsForRun(ctx context.Context, run contracts.ReplayRun) ([]contracts.ExecutionEvent, error) {
+	events, err := loadEventsForRun(ctx, r.db, run)
+	if err != nil {
+		return nil, err
+	}
+	if len(events) > 0 {
+		return events, nil
+	}
+	c, err := r.GetCapsule(ctx, run.CapsuleID)
+	if err != nil {
+		return nil, err
+	}
+	if len(c.EventIDs) == 0 {
+		return nil, ErrNotFound
+	}
+	return loadEvents(ctx, r.db, c.EventIDs)
+}
+
+func (r *PostgresRepository) GraphsForRun(ctx context.Context, run contracts.ReplayRun) (contracts.ExecutionGraph, error) {
+	c, err := r.GetCapsule(ctx, run.CapsuleID)
+	if err != nil {
+		return contracts.ExecutionGraph{}, err
+	}
+	return getJSON[contracts.ExecutionGraph](ctx, r.db, `SELECT payload FROM execution_graphs WHERE graph_id=$1`, c.GraphID)
+}
+
+type eventQueryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func loadEventsForRun(ctx context.Context, q eventQueryer, run contracts.ReplayRun) ([]contracts.ExecutionEvent, error) {
+	rows, err := q.QueryContext(ctx, `SELECT payload FROM execution_events WHERE replay_run_id=$1 ORDER BY occurred_at, sequence, event_id`, run.RunID)
+	if err != nil {
+		return nil, repositoryError(err)
+	}
+	defer rows.Close()
+	return scanEvents(ctx, rows)
+}
+
+func loadEvents(ctx context.Context, q eventQueryer, ids []string) ([]contracts.ExecutionEvent, error) {
+	rows, err := q.QueryContext(ctx, `SELECT payload FROM execution_events WHERE event_id = ANY($1) ORDER BY occurred_at, sequence, event_id`, ids)
+	if err != nil {
+		return nil, repositoryError(err)
+	}
+	defer rows.Close()
+	events, err := scanEvents(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(events) != len(ids) {
+		return nil, ErrNotFound
+	}
+	return events, nil
+}
+
+func scanEvents(ctx context.Context, rows *sql.Rows) ([]contracts.ExecutionEvent, error) {
+	events := []contracts.ExecutionEvent{}
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, ErrInternal
+		}
+		event, err := decodePayload[contracts.ExecutionEvent](raw)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, ErrInternal
+	}
+	return events, nil
+}
+
 type rowQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
