@@ -1,4 +1,4 @@
-import type { Ref } from "react";
+import type { PointerEvent, Ref } from "react";
 
 import type { OverviewCarouselStage } from "./carousel";
 
@@ -37,6 +37,18 @@ export function OverviewCard({
   isFront,
   onPromote,
 }: OverviewCardProps) {
+  function updateSheen(event: PointerEvent<HTMLElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    event.currentTarget.style.setProperty(
+      "--mouse-x",
+      `${event.clientX - bounds.left}px`,
+    );
+    event.currentTarget.style.setProperty(
+      "--mouse-y",
+      `${event.clientY - bounds.top}px`,
+    );
+  }
+
   return (
     <article
       aria-current={isFront ? "true" : undefined}
@@ -44,6 +56,7 @@ export function OverviewCard({
       className="orbit-card"
       data-front={isFront ? "true" : "false"}
       data-stage={content.stage}
+      onPointerMove={updateSheen}
       ref={articleRef}
       tabIndex={isFront ? -1 : undefined}
     >
@@ -73,12 +86,6 @@ export function OverviewCard({
           ) : null}
         </header>
 
-        <div className="orbit-card__signal" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-
         <p className="orbit-card__summary">{content.summary}</p>
 
         {content.metrics?.length ? (
@@ -90,13 +97,7 @@ export function OverviewCard({
               </div>
             ))}
           </dl>
-        ) : (
-          <div className="orbit-card__empty-metrics" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-        )}
+        ) : null}
 
         <a className="orbit-card__action" href={content.href}>
           <span>{content.actionLabel}</span>

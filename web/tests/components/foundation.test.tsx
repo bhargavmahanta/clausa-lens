@@ -14,6 +14,18 @@ describe("Command Center foundation", () => {
     );
   });
 
+  it("keeps the spatial overview in a perspective scene with reduced-motion support", () => {
+    const stylesheet = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+
+    expect(stylesheet).toMatch(
+      /\.orbit-stage\s*\{[^}]*perspective:\s*1600px;/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.orbit-card\s*\{[^}]*transform-style:\s*preserve-3d;/s,
+    );
+    expect(stylesheet).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
+  });
+
   it("provides a keyboard-visible skip link and labelled main landmark", async () => {
     const { CommandCenterShell } = await import("../../src/components/system");
     const markup = renderToStaticMarkup(<CommandCenterShell><p>Evidence</p></CommandCenterShell>);
