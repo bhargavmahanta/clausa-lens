@@ -10,6 +10,7 @@ export default function HomePage() {
         <span className="ambient-light ambient-light--one" />
         <span className="ambient-light ambient-light--two" />
         <span className="ambient-light ambient-light--three" />
+        <span className="ambient-light ambient-light--four" />
         <Image alt="" className="ambient-object ambient-object--ring" height={1199} sizes="(max-width: 720px) 220px, 28vw" src="/figma/ambient-ring.png" width={1312} />
         <Image alt="" className="ambient-object ambient-object--plant" height={1285} loading="eager" sizes="(max-width: 720px) 250px, 28vw" src="/figma/ambient-plant.png" width={1224} />
         <Image alt="" className="ambient-object ambient-object--stone" height={1024} sizes="(max-width: 720px) 1px, 30vw" src="/figma/ambient-stone.png" width={1536} />
