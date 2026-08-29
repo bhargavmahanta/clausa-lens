@@ -49,6 +49,23 @@ services:
       - default
       - db
 
+  command-center:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    environment:
+      CAUSALENS_CORE_API_URL: http://core-api:8080
+      CAUSALENS_GATEWAY_URL: http://demo-gateway:8080
+    depends_on:
+      core-api:
+        condition: service_started
+      demo-gateway:
+        condition: service_started
+    ports:
+      - "${COMMAND_CENTER_PORT:-3000}:3000"
+    networks:
+      - default
+
   # Demo capture system (Member 1 services). Images are provided by Member 1's
   # build; they emit canonical events to the Core API. These are the original
   # (captured) execution, not the replay boundary. demo-gateway is exposed to the
