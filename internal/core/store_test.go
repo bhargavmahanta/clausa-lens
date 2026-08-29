@@ -15,3 +15,16 @@ func TestStoreRejectsDuplicateEventIDs(t *testing.T) {
 		t.Fatal("duplicate event ID should fail")
 	}
 }
+
+func TestStorePersistsIncident(t *testing.T) {
+	s := NewStore()
+	i := contracts.Incident{SchemaVersion: "1.0", IncidentID: "inc-1", Status: "READY"}
+	g := contracts.ExecutionGraph{GraphID: "g-1", SchemaVersion: "1.0"}
+	if err := s.PutIncident(i, g); err != nil {
+		t.Fatal(err)
+	}
+	got, graph, ok := s.Incident("inc-1")
+	if !ok || got.IncidentID != "inc-1" || graph.GraphID != "g-1" {
+		t.Fatal("incident detail not returned")
+	}
+}
