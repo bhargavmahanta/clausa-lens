@@ -4,11 +4,10 @@ import {
   baselineRun,
   capsule,
   capturedEvent,
-  graph,
+  goldenIncidentDetail,
   incident,
   replayDiff,
   resetResult,
-  retryEvent,
 } from "../fixtures/golden-contracts";
 
 type FetchCall = {
@@ -75,7 +74,7 @@ describe("CausaLens API client", () => {
       if (url.pathname === "/v1/events") return Response.json({ event_id: capturedEvent.event_id, status: "ACCEPTED" }, { status: 202 });
       if (url.pathname === "/v1/incidents") return Response.json({ items: [incident] });
       if (url.pathname === "/v1/incidents/inc-8271") {
-        return Response.json({ incident, graph, events: [capturedEvent, retryEvent] });
+        return Response.json(goldenIncidentDetail);
       }
       if (url.pathname === "/v1/incidents/inc-8271/capsules") return Response.json(capsule, { status: 201 });
       if (url.pathname === "/v1/capsules/cap-8271/runs") return Response.json(baselineRun, { status: 202 });

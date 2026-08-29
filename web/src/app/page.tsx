@@ -1,77 +1,31 @@
-import { CommandCenterShell, StatePanel } from "../components/system";
-import { WorkflowProgress } from "../components/workflow";
+import Image from "next/image";
+
+import { CommandCenterShell } from "../components/system";
+import { IncidentCommandCenter } from "../features/incidents";
 
 export default function HomePage() {
   return (
     <CommandCenterShell>
-      <section className="hero" aria-labelledby="hero-title">
-        <div className="hero__copy">
-          <p className="eyebrow">Evidence-first incident replay</p>
-          <h1 id="hero-title">Make distributed incidents replayable.</h1>
-          <p className="hero__lede">
-            Capture one distributed failure, reproduce it inside an isolated runtime,
-            change one approved condition, and inspect the first meaningful divergence.
-          </p>
-        </div>
-        <div className="hero__contract" aria-label="Frozen frontend contract">
-          <span>Frontend foundation</span>
-          <strong>Next.js 16.2.11</strong>
-          <code>API v1.0</code>
-        </div>
-      </section>
+      <div className="ambient-scene" aria-hidden="true">
+        <span className="ambient-light ambient-light--one" />
+        <span className="ambient-light ambient-light--two" />
+        <span className="ambient-light ambient-light--three" />
+        <Image alt="" className="ambient-object ambient-object--ring" height={1199} sizes="(max-width: 720px) 220px, 28vw" src="/figma/ambient-ring.png" width={1312} />
+        <Image alt="" className="ambient-object ambient-object--plant" height={1285} loading="eager" sizes="(max-width: 720px) 250px, 28vw" src="/figma/ambient-plant.png" width={1224} />
+        <Image alt="" className="ambient-object ambient-object--stone" height={1024} sizes="(max-width: 720px) 1px, 30vw" src="/figma/ambient-stone.png" width={1536} />
+        <Image alt="" className="ambient-object ambient-object--monolith" height={1536} sizes="(max-width: 720px) 150px, 17vw" src="/figma/ambient-monolith.png" width={1024} />
+        <Image alt="" className="ambient-object ambient-object--orb" height={1254} loading="eager" sizes="(max-width: 720px) 1px, 16vw" src="/figma/ambient-orb.png" width={1254} />
+      </div>
 
-      <section className="workflow-section" aria-labelledby="workflow-title">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Golden investigation</p>
-            <h2 id="workflow-title">Capture to Replay Diff</h2>
-          </div>
-          <p>Every completed step will be backed by a decoded Core API resource.</p>
-        </div>
-        <WorkflowProgress currentStep="capture" />
-      </section>
-
-      <section className="foundation-grid" aria-label="Command Center readiness">
-        <StatePanel
-          state="loading"
-          title="Waiting for Core API"
-          message="No incident, isolation, replay, or outcome state is displayed until a valid v1.0 resource is received."
-        />
-
-        <article className="evidence-card">
-          <p className="eyebrow">Frozen scenario contract</p>
-          <h2>Checkout duplicate effect</h2>
-          <dl className="contract-facts">
-            <div>
-              <dt>Payment latency</dt>
-              <dd>350 ms</dd>
-            </div>
-            <div>
-              <dt>Checkout timeout</dt>
-              <dd>200 ms</dd>
-            </div>
-            <div>
-              <dt>Approved what-if</dt>
-              <dd>50 ms</dd>
-            </div>
-          </dl>
-          <p className="evidence-card__note">
-            These are contract values, not a claim about current runtime health.
-          </p>
-        </article>
-      </section>
-
-      <section className="principles" aria-labelledby="principles-title">
+      <section className="workspace-intro" aria-labelledby="workspace-title">
         <div>
-          <p className="eyebrow">Rendering discipline</p>
-          <h2 id="principles-title">The interface presents evidence. The API owns truth.</h2>
+          <p className="eyebrow">Capture → Trace · Checkpoint C2</p>
+          <h1 id="workspace-title">Incident analysis</h1>
         </div>
-        <ul>
-          <li>Closed enums and unknown fields are rejected.</li>
-          <li>Blocked and failed runs never receive an outcome.</li>
-          <li>Isolation, oracle, lifecycle, and outcome stay visibly separate.</li>
-        </ul>
+        <p>One captured failure, four evidence surfaces, zero invented conclusions.</p>
       </section>
+
+      <IncidentCommandCenter />
     </CommandCenterShell>
   );
 }

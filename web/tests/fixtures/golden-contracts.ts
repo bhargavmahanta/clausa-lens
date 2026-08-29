@@ -46,6 +46,73 @@ export const retryEvent = {
   attributes: {},
 } as const;
 
+export const gatewayEvent = {
+  ...capturedEvent,
+  event_id: "evt-gateway-start",
+  parent_event_id: undefined,
+  component: { name: "gateway", instance: "gateway-1" },
+  operation: { name: "POST /checkout", kind: "ENTRYPOINT" },
+  occurred_at: "2026-08-29T10:32:01.000Z",
+  sequence: 0,
+  attributes: {},
+} as const;
+
+export const checkoutEvent = {
+  ...capturedEvent,
+  event_id: "evt-checkout-start",
+  parent_event_id: "evt-gateway-start",
+  component: { name: "checkout", instance: "checkout-1" },
+  operation: { name: "checkout", kind: "INTERNAL" },
+  occurred_at: "2026-08-29T10:32:01.004Z",
+  sequence: 1,
+  attributes: {},
+} as const;
+
+export const timeoutEvent = {
+  ...capturedEvent,
+  event_id: "evt-timeout",
+  parent_event_id: "evt-checkout-start",
+  component: { name: "checkout", instance: "checkout-1" },
+  operation: { name: "payment-timeout", kind: "CONTROL" },
+  event_type: "TIMEOUT",
+  occurred_at: "2026-08-29T10:32:01.204Z",
+  sequence: 3,
+  duration_ms: 200,
+  status: "TIMEOUT",
+  attributes: { checkout_timeout_ms: 200 },
+} as const;
+
+export const paymentAttemptTwoEvent = {
+  ...capturedEvent,
+  event_id: "evt-payment-2-start",
+  attempt: 2,
+  occurred_at: "2026-08-29T10:32:01.210Z",
+  sequence: 5,
+} as const;
+
+export const ledgerEffectOneEvent = {
+  ...capturedEvent,
+  event_id: "evt-ledger-1",
+  parent_event_id: "evt-payment-1-start",
+  component: { name: "ledger", instance: "ledger-1" },
+  operation: { name: "commit", kind: "SIDE_EFFECT" },
+  event_type: "EFFECT",
+  occurred_at: "2026-08-29T10:32:01.365Z",
+  sequence: 6,
+  status: "SUCCESS",
+  attributes: { effect_id: "ledger-effect-1", effect_committed: true },
+} as const;
+
+export const ledgerEffectTwoEvent = {
+  ...ledgerEffectOneEvent,
+  event_id: "evt-ledger-2",
+  parent_event_id: "evt-payment-2-start",
+  attempt: 2,
+  occurred_at: "2026-08-29T10:32:01.560Z",
+  sequence: 7,
+  attributes: { effect_id: "ledger-effect-2", effect_committed: true },
+} as const;
+
 export const graph = {
   schema_version: "1.0",
   graph_id: "graph-8271",
@@ -62,6 +129,45 @@ export const graph = {
       to_event_id: "evt-retry",
       type: "RETRY",
     },
+  ],
+} as const;
+
+export const goldenIncidentDetail = {
+  incident,
+  graph: {
+    schema_version: "1.0",
+    graph_id: "graph-8271",
+    incident_id: "inc-8271",
+    ordering_policy_version: "1.0",
+    nodes: [
+      { event_id: "evt-gateway-start", timeline_index: 0 },
+      { event_id: "evt-checkout-start", timeline_index: 1 },
+      { event_id: "evt-payment-1-start", timeline_index: 2 },
+      { event_id: "evt-timeout", timeline_index: 3 },
+      { event_id: "evt-retry", timeline_index: 4 },
+      { event_id: "evt-payment-2-start", timeline_index: 5 },
+      { event_id: "evt-ledger-1", timeline_index: 6 },
+      { event_id: "evt-ledger-2", timeline_index: 7 },
+    ],
+    edges: [
+      { edge_id: "edge-gateway-checkout", from_event_id: "evt-gateway-start", to_event_id: "evt-checkout-start", type: "PARENT_CHILD" },
+      { edge_id: "edge-checkout-payment", from_event_id: "evt-checkout-start", to_event_id: "evt-payment-1-start", type: "DEPENDENCY" },
+      { edge_id: "edge-timeout", from_event_id: "evt-payment-1-start", to_event_id: "evt-timeout", type: "TEMPORAL" },
+      { edge_id: "edge-retry", from_event_id: "evt-timeout", to_event_id: "evt-retry", type: "RETRY" },
+      { edge_id: "edge-attempt-two", from_event_id: "evt-retry", to_event_id: "evt-payment-2-start", type: "RETRY" },
+      { edge_id: "edge-effect-one", from_event_id: "evt-payment-1-start", to_event_id: "evt-ledger-1", type: "SIDE_EFFECT" },
+      { edge_id: "edge-effect-two", from_event_id: "evt-payment-2-start", to_event_id: "evt-ledger-2", type: "SIDE_EFFECT" },
+    ],
+  },
+  events: [
+    gatewayEvent,
+    checkoutEvent,
+    { ...capturedEvent, sequence: 2 },
+    timeoutEvent,
+    { ...retryEvent, sequence: 4 },
+    paymentAttemptTwoEvent,
+    ledgerEffectOneEvent,
+    ledgerEffectTwoEvent,
   ],
 } as const;
 

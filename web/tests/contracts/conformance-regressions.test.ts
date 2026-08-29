@@ -4,10 +4,10 @@ import {
   baselineRun,
   capsule,
   capturedEvent,
+  goldenIncidentDetail,
   graph,
   incident,
   replayDiff,
-  retryEvent,
 } from "../fixtures/golden-contracts";
 
 describe("frozen contract conformance regressions", () => {
@@ -156,9 +156,42 @@ describe("frozen contract conformance regressions", () => {
 
   it("requires incident events to follow graph timeline order", async () => {
     const { incidentDetailResponseSchema } = await import("../../src/lib/contracts");
-    const response = { incident, graph, events: [retryEvent, capturedEvent] };
+    const response = {
+      ...goldenIncidentDetail,
+      events: [...goldenIncidentDetail.events].reverse(),
+    };
 
     expect(incidentDetailResponseSchema.safeParse(response).success).toBe(false);
-    expect(incidentDetailResponseSchema.safeParse({ ...response, events: [capturedEvent, retryEvent] }).success).toBe(true);
+    expect(incidentDetailResponseSchema.safeParse(goldenIncidentDetail).success).toBe(true);
+  });
+
+  it("rejects incident details whose oracle evidence references do not resolve", async () => {
+    const { incidentDetailResponseSchema } = await import("../../src/lib/contracts");
+    const malformedDetail = {
+      ...goldenIncidentDetail,
+      incident: {
+        ...goldenIncidentDetail.incident,
+        evidence_event_ids: [...goldenIncidentDetail.incident.evidence_event_ids, "evt-missing"],
+      },
+    };
+
+    expect(incidentDetailResponseSchema.safeParse(malformedDetail).success).toBe(false);
+  });
+
+  it("rejects incident details whose graph or events belong to another resource", async () => {
+    const { incidentDetailResponseSchema } = await import("../../src/lib/contracts");
+    const wrongGraphIdentity = {
+      ...goldenIncidentDetail,
+      graph: { ...goldenIncidentDetail.graph, incident_id: "inc-other" },
+    };
+    const wrongEventIdentity = {
+      ...goldenIncidentDetail,
+      events: goldenIncidentDetail.events.map((event, index) =>
+        index === 0 ? { ...event, trace_id: "trace-other" } : event,
+      ),
+    };
+
+    expect(incidentDetailResponseSchema.safeParse(wrongGraphIdentity).success).toBe(false);
+    expect(incidentDetailResponseSchema.safeParse(wrongEventIdentity).success).toBe(false);
   });
 });

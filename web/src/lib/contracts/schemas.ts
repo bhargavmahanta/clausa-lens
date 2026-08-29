@@ -702,6 +702,35 @@ export const incidentDetailResponseSchema = z
         path: ["events"],
       });
     }
+
+    const eventIds = new Set(responseEventIds);
+    detail.incident.evidence_event_ids.forEach((eventId, index) => {
+      if (!eventIds.has(eventId)) {
+        context.addIssue({
+          code: "custom",
+          message: "Incident evidence references must resolve to detail events",
+          path: ["incident", "evidence_event_ids", index],
+        });
+      }
+    });
+
+    if (detail.graph.incident_id !== detail.incident.incident_id) {
+      context.addIssue({
+        code: "custom",
+        message: "Incident graph must belong to the detail incident",
+        path: ["graph", "incident_id"],
+      });
+    }
+
+    detail.events.forEach((event, index) => {
+      if (event.trace_id !== detail.incident.trace_id || event.execution_id !== detail.incident.execution_id) {
+        context.addIssue({
+          code: "custom",
+          message: "Incident events must belong to the incident trace and execution",
+          path: ["events", index],
+        });
+      }
+    });
   });
 
 export const createRunRequestSchema = z
