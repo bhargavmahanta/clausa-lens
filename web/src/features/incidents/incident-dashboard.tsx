@@ -141,6 +141,25 @@ function TracePanel({ detail }: { detail: IncidentDetailResponse }) {
         ))}
       </div>
 
+      <section className="execution-graph" aria-labelledby="execution-graph-title">
+        <div className="panel-subheading">
+          <h3 id="execution-graph-title">Execution graph</h3>
+          <span>{view.graphNodes.length} nodes</span>
+        </div>
+        <ol className="execution-graph__nodes">
+          {view.graphNodes.map(({ event, timelineIndex }) => (
+            <li key={event.event_id}>
+              <span aria-label={`Graph node #${String(timelineIndex).padStart(2, "0")}`}>
+                #{String(timelineIndex).padStart(2, "0")}
+              </span>
+              <strong>{event.component.name}</strong>
+              <small>{event.operation.name}</small>
+              <code>{event.event_id}</code>
+            </li>
+          ))}
+        </ol>
+      </section>
+
       <section className="edge-register" aria-labelledby="edge-register-title">
         <div className="panel-subheading">
           <h3 id="edge-register-title">Observed structure</h3>

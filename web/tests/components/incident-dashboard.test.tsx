@@ -24,6 +24,12 @@ describe("C2 incident dashboard", () => {
     expect(markup).toContain("trace-8271");
     expect(markup).toContain("exec-original-8271");
     expect(markup).toContain("Observed structure");
+    expect(markup).toContain("Execution graph");
+    expect(markup).toContain("Graph node #00");
+    expect(markup).toContain("evt-gateway-start");
+    expect(markup).toContain("PARENT_CHILD");
+    expect(markup).toContain("evt-checkout-start");
+    expect(markup).not.toContain("fixture-only-event");
     expect(markup).toContain("Components in timeline order");
     expect(markup).not.toContain("Component execution path");
     expect(markup).not.toContain("Causal edge");

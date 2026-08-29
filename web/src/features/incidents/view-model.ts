@@ -15,10 +15,16 @@ export type StructuralEdge = {
   type: IncidentDetailResponse["graph"]["edges"][number]["type"];
 };
 
+export type ExecutionGraphNodeView = {
+  event: ExecutionEvent;
+  timelineIndex: number;
+};
+
 export type IncidentEvidenceView = {
   requestId: string | undefined;
   componentPath: string[];
   timeline: IncidentTimelineEntry[];
+  graphNodes: ExecutionGraphNodeView[];
   structuralEdges: StructuralEdge[];
   evidenceEvents: ExecutionEvent[];
 };
@@ -26,13 +32,16 @@ export type IncidentEvidenceView = {
 export function buildIncidentView(
   detail: IncidentDetailResponse,
 ): IncidentEvidenceView {
-  const timelineIndexByEventId = new Map(
-    detail.graph.nodes.map((node) => [node.event_id, node.timeline_index]),
-  );
   const eventById = new Map(
     detail.events.map((event) => [event.event_id, event]),
   );
-  const componentPath = detail.events.reduce<string[]>((components, event) => {
+  const graphNodes = detail.graph.nodes
+    .flatMap((node) => {
+      const event = eventById.get(node.event_id);
+      return event ? [{ event, timelineIndex: node.timeline_index }] : [];
+    })
+    .sort((left, right) => left.timelineIndex - right.timelineIndex);
+  const componentPath = graphNodes.reduce<string[]>((components, { event }) => {
     if (!components.includes(event.component.name)) {
       components.push(event.component.name);
     }
@@ -40,12 +49,10 @@ export function buildIncidentView(
   }, []);
 
   return {
-    requestId: detail.events[0]?.logical_operation_id,
+    requestId: graphNodes[0]?.event.logical_operation_id,
     componentPath,
-    timeline: detail.events.map((event) => ({
-      event,
-      timelineIndex: timelineIndexByEventId.get(event.event_id) ?? -1,
-    })),
+    timeline: graphNodes,
+    graphNodes,
     structuralEdges: detail.graph.edges.map((edge) => ({
       edgeId: edge.edge_id,
       fromEventId: edge.from_event_id,
