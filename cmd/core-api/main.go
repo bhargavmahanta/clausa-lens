@@ -16,6 +16,7 @@ import (
 	"github.com/causalens/causalens/internal/contracts"
 	"github.com/causalens/causalens/internal/core"
 	"github.com/causalens/causalens/internal/differential"
+	"github.com/causalens/causalens/internal/packregistry"
 	"github.com/causalens/causalens/internal/replay"
 )
 
@@ -415,7 +416,18 @@ func main() {
 	if err := db.PingContext(ctx); err != nil {
 		log.Fatal("database is unavailable")
 	}
-	if err := http.ListenAndServe(":8080", handler(core.NewPostgresRepository(db))); err != nil {
+	h := handlerWithDeps(core.NewPostgresRepository(db), HandlerDeps{Pack: resolvePack()})
+	if err := http.ListenAndServe(":8080", h); err != nil {
 		log.Fatal("core API stopped")
 	}
+}
+
+// resolvePack selects the System Pack for this deployment from the PACK_IMPL
+// environment value via the pack registry. PACK_IMPL may be empty, in which
+// case no pack is wired and the capsule/diff routes return PACK_UNAVAILABLE
+// rather than failing; or it may name the dev pack ("dev") or, once Member 1
+// lands their work, the real checkout pack implementation token. The registry
+// keeps core logic pack-agnostic; only this call site reads the environment.
+func resolvePack() contracts.SystemPack {
+	return packregistry.Resolve(os.Getenv("PACK_IMPL"))
 }

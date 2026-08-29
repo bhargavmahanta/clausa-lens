@@ -342,6 +342,76 @@ func TestCreateCapsuleNoPackUnavailable(t *testing.T) {
 	}
 }
 
+func TestResolvePackFollowsEnv(t *testing.T) {
+	t.Setenv("PACK_IMPL", "dev")
+	pack := resolvePack()
+	if pack == nil {
+		t.Fatal("PACK_IMPL=dev must resolve to a pack")
+	}
+	if got := pack.Descriptor().ID; got != "checkout_duplicate_effect_dev" {
+		t.Fatalf("resolved pack id = %q", got)
+	}
+
+	t.Setenv("PACK_IMPL", "")
+	if pack := resolvePack(); pack != nil {
+		t.Fatal("empty PACK_IMPL must resolve to no pack")
+	}
+	t.Setenv("PACK_IMPL", "unknown-token")
+	if pack := resolvePack(); pack != nil {
+		t.Fatal("unknown PACK_IMPL must resolve to no pack")
+	}
+}
+
+func TestCreateCapsuleWithResolvedPackSucceeds(t *testing.T) {
+	t.Setenv("PACK_IMPL", "dev")
+	f := &fakeRepository{detail: readyDetail()}
+	h := handlerWithDeps(f, HandlerDeps{Pack: resolvePack()})
+	w := request(t, h, http.MethodPost, "/v1/incidents/inc-1/capsules", "")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	var got contracts.ReplayCapsule
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if err := got.Validate(); err != nil {
+		t.Fatalf("capsule fails Validate: %v", err)
+	}
+	if !capsule.VerifyDigest(got) {
+		t.Fatal("VerifyDigest false")
+	}
+}
+
+func TestCreateDiffWithResolvedPackSucceeds(t *testing.T) {
+	t.Setenv("PACK_IMPL", "dev")
+	f := &fakeRepository{
+		runs: map[string]contracts.ReplayRun{
+			"run-base": goldenBaseline(),
+			"run-comp": goldenWhatIf(),
+		},
+		eventsByRun: map[string][]contracts.ExecutionEvent{
+			"run-base": goldenEvents("be1", "be2"),
+			"run-comp": goldenEvents("ce1"),
+		},
+		graphsByRun: map[string]contracts.ExecutionGraph{
+			"run-base": goldenGraph("be1", "be2"),
+			"run-comp": goldenGraph("ce1"),
+		},
+	}
+	h := handlerWithDeps(f, HandlerDeps{Pack: resolvePack()})
+	w := request(t, h, http.MethodPost, "/v1/diffs", `{"baseline_run_id":"run-base","comparison_run_id":"run-comp"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	var diff contracts.ReplayDiff
+	if err := json.Unmarshal(w.Body.Bytes(), &diff); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if err := diff.Validate(); err != nil {
+		t.Fatalf("diff fails Validate: %v", err)
+	}
+}
+
 func TestCreateRunAcceptsWhatIf(t *testing.T) {
 	f := &fakeRepository{capsules: map[string]contracts.ReplayCapsule{
 		"cap-1": {CapsuleID: "cap-1", Integrity: contracts.Integrity{Algorithm: contracts.IntegritySHA256, Digest: validDigest}},
