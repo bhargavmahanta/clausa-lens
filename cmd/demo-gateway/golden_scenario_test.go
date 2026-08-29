@@ -57,6 +57,7 @@ func coreAPIEventsServer(t *testing.T) (*httptest.Server, *core.Store) {
 // independent binaries.
 type goldenHarness struct {
 	store *core.Store
+	local *capture.InMemorySink
 
 	gateway  *gatewaysvc.Service
 	checkout *checkoutsvc.Service
@@ -69,8 +70,13 @@ type goldenHarness struct {
 func newGoldenHarness(t *testing.T) *goldenHarness {
 	t.Helper()
 	eventsServer, store := coreAPIEventsServer(t)
-	h := &goldenHarness{store: store}
-	sink := capture.NewHTTPSink(eventsServer.URL + "/v1/events")
+	local := capture.NewInMemorySink()
+	h := &goldenHarness{store: store, local: local}
+	// Every event goes to both the fake Core API (proving it passes
+	// Bhargav's real validation and storage path) and a local sink (so
+	// tests can inspect captured evidence directly, e.g. to evaluate the
+	// oracle without a live incident-creation pipeline).
+	sink := capture.MultiSink{Sinks: []capture.Sink{capture.NewHTTPSink(eventsServer.URL + "/v1/events"), local}}
 
 	ledgerRecorder := capture.NewRecorder(contracts.ComponentRef{Name: "ledger", Instance: "ledger-1"}, capture.NewIDGenerator(1), sink)
 	h.ledger = ledgersvc.New(ledgerRecorder)
@@ -107,6 +113,7 @@ func (h *goldenHarness) reset(ctx context.Context) {
 	h.payment.Reset()
 	h.checkout.Reset()
 	h.gateway.Reset()
+	h.local.Reset()
 	_, _ = h.store.Reset(ctx)
 }
 

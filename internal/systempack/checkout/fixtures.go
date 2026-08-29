@@ -8,13 +8,8 @@ import (
 	"fmt"
 
 	"github.com/causalens/causalens/internal/contracts"
+	golden "github.com/causalens/causalens/test/fixtures/golden"
 )
-
-// ledgerEmptyStateContent is the canonical, sanitized content of the
-// replay-only empty ledger fixture (docs/SYSTEM_PACKS.md: "Empty,
-// resettable replay ledger state"). Its digest is computed deterministically
-// so the same fixture always produces the same content_digest.
-var ledgerEmptyStateContent = []byte(`{"table":"ledger_effects","rows":[]}`)
 
 // ExtractFixtures implements contracts.SystemPack: it selects the sanitized
 // state and dependency fixtures required to replay the golden checkout
@@ -28,7 +23,7 @@ func (p *Pack) ExtractFixtures(_ context.Context, _ contracts.Incident, events [
 		invocationLimit = 1
 	}
 
-	digest := sha256.Sum256(ledgerEmptyStateContent)
+	digest := sha256.Sum256(golden.LedgerEmptyStateContent)
 
 	stateFixture := contracts.StateFixture{
 		FixtureID:          "state-ledger-empty",

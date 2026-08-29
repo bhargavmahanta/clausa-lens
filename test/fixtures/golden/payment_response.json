@@ -1,0 +1,11 @@
+{
+  "request_match": {
+    "logical_operation_id": "checkout-8271"
+  },
+  "response": {
+    "status": "APPROVED"
+  },
+  "latency_ms": 350,
+  "failure_mode": "NONE",
+  "invocation_limit": 2
+}
