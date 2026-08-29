@@ -13,6 +13,8 @@ import (
 	"github.com/causalens/causalens/internal/capsule"
 	"github.com/causalens/causalens/internal/contracts"
 	"github.com/causalens/causalens/internal/core"
+	"github.com/causalens/causalens/internal/packregistry"
+	"github.com/causalens/causalens/internal/systempack/checkout"
 )
 
 const validEventJSON = `{"schema_version":"1.0","event_id":"e1","execution_id":"exec","trace_id":"trace","component":{"name":"c","instance":"i"},"operation":{"name":"o","kind":"INTERNAL"},"event_type":"START","attempt":1,"logical_operation_id":"logical","occurred_at":"2026-08-29T10:32:01Z","sequence":0,"status":"RUNNING","attributes":{}}`
@@ -682,6 +684,18 @@ func TestLifecycleAndSafetyMapperUseFrozenCodes(t *testing.T) {
 		writeMappedError(w, tc.err, tc.code)
 		if w.Code != tc.status || !strings.Contains(w.Body.String(), `"code":"`+string(tc.code)+`"`) || !strings.Contains(w.Body.String(), `"details":{}`) {
 			t.Fatalf("%d %s", w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestPackRegistrationResolvesBothImplementations(t *testing.T) {
+	for _, token := range []string{packregistry.DevImplementation, checkout.PackID} {
+		p := packregistry.Resolve(token)
+		if p == nil {
+			t.Fatalf("Resolve(%q) = nil", token)
+		}
+		if p.Descriptor().ID == "" {
+			t.Fatalf("Resolve(%q).Descriptor().ID is empty", token)
 		}
 	}
 }
