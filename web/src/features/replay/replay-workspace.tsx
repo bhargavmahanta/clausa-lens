@@ -98,7 +98,7 @@ export function ReplayWorkspace({
   return (
     <section className="replay-workspace" aria-labelledby="replay-workspace-title">
       <header className="workspace-section-heading">
-        <div><p className="eyebrow">Compile → Reproduce → Intervene → Diff</p><h1 id="replay-workspace-title">Controlled replay</h1></div>
+        <div><p className="eyebrow">Compile → Reproduce → Intervene → Diff</p><h2 id="replay-workspace-title">Controlled replay</h2></div>
         <p>Every value below arrives through the frozen API boundary.</p>
       </header>
 

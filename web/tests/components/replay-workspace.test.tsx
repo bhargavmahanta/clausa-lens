@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ReplayCapsule, ReplayRun } from "../../src/lib/contracts";
 import type { ReplayWorkspaceProps } from "../../src/features/replay/replay-workspace";
-import { baselineRun, capsule, isolationEvidence } from "../fixtures/golden-contracts";
+import { baselineRun, capsule } from "../fixtures/golden-contracts";
 
 const readyCapsule = capsule as unknown as ReplayCapsule;
 const completedBaseline = baselineRun as unknown as ReplayRun;

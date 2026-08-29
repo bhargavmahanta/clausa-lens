@@ -4,6 +4,15 @@ import { describe, expect, it } from "vitest";
 import { baselineRun } from "../fixtures/golden-contracts";
 
 describe("Command Center foundation", () => {
+  it("provides a keyboard-visible skip link and labelled main landmark", async () => {
+    const { CommandCenterShell } = await import("../../src/components/system");
+    const markup = renderToStaticMarkup(<CommandCenterShell><p>Evidence</p></CommandCenterShell>);
+
+    expect(markup).toContain('class="skip-link"');
+    expect(markup).toContain('href="#main-content"');
+    expect(markup).toContain('<main id="main-content" tabindex="-1">');
+  });
+
   it("renders a truthful investigation workflow without marking future steps complete", async () => {
     const workflow = (await import("../../src/components/workflow")) as Record<string, unknown>;
     expect(workflow.WorkflowProgress).toBeDefined();
