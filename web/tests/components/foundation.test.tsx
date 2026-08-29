@@ -1,9 +1,19 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { baselineRun } from "../fixtures/golden-contracts";
 
 describe("Command Center foundation", () => {
+  it("keeps investigation navigation controls at least 44px tall", () => {
+    const stylesheet = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+
+    expect(stylesheet).toMatch(
+      /\.panel-switcher button\s*\{[^}]*min-height:\s*44px;/s,
+    );
+  });
+
   it("provides a keyboard-visible skip link and labelled main landmark", async () => {
     const { CommandCenterShell } = await import("../../src/components/system");
     const markup = renderToStaticMarkup(<CommandCenterShell><p>Evidence</p></CommandCenterShell>);
