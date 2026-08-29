@@ -1,0 +1,30 @@
+# Normalize text files to LF for all contributors regardless of checkout OS.
+# Prevents the 1994-line CRLF/LF churn that previously made git status report
+# every docs/planning file as modified with no actual content change.
+* text=auto eol=lf
+
+# Explicit text file types
+*.go    text eol=lf
+*.md    text eol=lf
+*.mod   text eol=lf
+*.sum   text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.sql   text eol=lf
+*.json  text eol=lf
+*.toml  text eol=lf
+*.sh    text eol=lf
+*.mk    text eol=lf
+Makefile text eol=lf
+.gitattributes text eol=lf
+
+# Generated / image binaries
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
