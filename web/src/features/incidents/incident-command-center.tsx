@@ -9,14 +9,22 @@ import {
   classifyIncidentCollection,
   toIncidentDashboardError,
 } from "./incident-resource";
+import { resolveIncidentDataSource } from "./data-source";
 
-const defaultApiBaseUrl = "http://localhost:8080";
+export const incidentDataSource = resolveIncidentDataSource({
+  configuredBaseUrl: process.env.NEXT_PUBLIC_CAUSALENS_API_URL,
+  isDevelopment: process.env.NODE_ENV === "development",
+});
 
-export function IncidentCommandCenter() {
+export function IncidentCommandCenter({
+  onSelectionChange,
+}: {
+  onSelectionChange?: (incidentId: string | undefined) => void;
+}) {
   const client = useMemo(
     () =>
       createCausaLensClient({
-        baseUrl: process.env.NEXT_PUBLIC_CAUSALENS_API_URL ?? defaultApiBaseUrl,
+        baseUrl: incidentDataSource.baseUrl,
       }),
     [],
   );
@@ -41,6 +49,7 @@ export function IncidentCommandCenter() {
           setSelectedIncidentId(classification.incidentId);
           return;
         }
+        onSelectionChange?.(undefined);
         setState(classification);
       } catch (error) {
         if (!cancelled) setState(toIncidentDashboardError(error));
@@ -51,7 +60,7 @@ export function IncidentCommandCenter() {
     return () => {
       cancelled = true;
     };
-  }, [client, requestVersion]);
+  }, [client, onSelectionChange, requestVersion]);
 
   useEffect(() => {
     if (!selectedIncidentId) return;
@@ -62,6 +71,7 @@ export function IncidentCommandCenter() {
         const detail = await client.getIncident(selectedIncidentId as string);
         if (!cancelled) {
           setState({ status: "ready", incidents, detail, nextCursor });
+          onSelectionChange?.(detail.incident.incident_id);
         }
       } catch (error) {
         if (!cancelled) setState(toIncidentDashboardError(error));
@@ -72,17 +82,19 @@ export function IncidentCommandCenter() {
     return () => {
       cancelled = true;
     };
-  }, [client, incidents, nextCursor, selectedIncidentId]);
+  }, [client, incidents, nextCursor, onSelectionChange, selectedIncidentId]);
 
   function selectIncident(incidentId: string) {
     const selected = incidents.find((item) => item.incident_id === incidentId);
     if (!selected) return;
     if (selected.status === "BLOCKED") {
+      onSelectionChange?.(undefined);
       setSelectedIncidentId(undefined);
       setState({ status: "blocked", incident: selected });
       return;
     }
     if (selected.status === "DETECTED") {
+      onSelectionChange?.(undefined);
       setSelectedIncidentId(undefined);
       setState({ status: "pending", incident: selected });
       return;
@@ -92,17 +104,25 @@ export function IncidentCommandCenter() {
   }
 
   function retryRequest() {
+    onSelectionChange?.(undefined);
     setState({ status: "loading" });
     setSelectedIncidentId(undefined);
     setRequestVersion((version) => version + 1);
   }
 
   return (
-    <IncidentDashboard
-      availableIncidents={incidents}
-      onRetry={retryRequest}
-      onSelectIncident={selectIncident}
-      state={state}
-    />
+    <>
+      {incidentDataSource.mode === "fixture" ? (
+        <p className="fixture-mode-notice" role="status">
+          Development fixture preview · Core API not connected
+        </p>
+      ) : null}
+      <IncidentDashboard
+        availableIncidents={incidents}
+        onRetry={retryRequest}
+        onSelectIncident={selectIncident}
+        state={state}
+      />
+    </>
   );
 }

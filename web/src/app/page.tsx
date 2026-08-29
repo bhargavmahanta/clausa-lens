@@ -1,7 +1,7 @@
 import Image from "next/image";
 
 import { CommandCenterShell } from "../components/system";
-import { IncidentCommandCenter } from "../features/incidents";
+import { CommandCenter } from "../features/command-center";
 
 export default function HomePage() {
   return (
@@ -17,15 +17,7 @@ export default function HomePage() {
         <Image alt="" className="ambient-object ambient-object--orb" height={1254} loading="eager" sizes="(max-width: 720px) 1px, 16vw" src="/figma/ambient-orb.png" width={1254} />
       </div>
 
-      <section className="workspace-intro" aria-labelledby="workspace-title">
-        <div>
-          <p className="eyebrow">Capture → Trace · Checkpoint C2</p>
-          <h1 id="workspace-title">Incident analysis</h1>
-        </div>
-        <p>One captured failure, four evidence surfaces, zero invented conclusions.</p>
-      </section>
-
-      <IncidentCommandCenter />
+      <CommandCenter />
     </CommandCenterShell>
   );
 }
