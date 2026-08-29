@@ -15,6 +15,15 @@ describe("command center workflow components", () => {
     expect(markup).toContain("Controlled replay");
     expect(markup).toContain("Reset demo workflow");
     expect(markup).toContain("Development fixture preview");
+    expect(markup).toContain("Incident / Trace");
+    expect(markup).toContain("Replay Capsule");
+    expect(markup).toContain("Baseline and what-if");
+    expect(markup).toContain("First meaningful divergence");
+    expect(markup).toContain("No incident selected");
+    expect(markup).toContain("Awaiting capsule compilation");
+    expect(markup.match(/data-stage=/g)).toHaveLength(4);
+    expect(markup).not.toContain('data-stage="overview"');
+    expect(markup).not.toContain('data-stage="capture"');
     expect(markup).not.toContain("cap-8271");
     expect(markup).not.toContain("REPRODUCED");
     expect(markup).not.toContain("MITIGATED");

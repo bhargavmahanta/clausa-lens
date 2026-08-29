@@ -167,12 +167,7 @@ export function CommandCenter() {
   const diff = state.diff.status === "ready" ? state.diff.value : undefined;
   const demoPending = demo.status === "starting" || demo.status === "waiting";
 
-  const capturedStage = Boolean(selectedIncidentId);
   const replayStage = state.baseline.status === "ready" && state.baseline.value.status === "COMPLETED";
-  const whatIfStage = state.whatIf.status === "ready" && state.whatIf.value.status === "COMPLETED";
-  const diffStage = state.diff.status === "ready";
-  const completedStageCount = [capturedStage, replayStage, whatIfStage, diffStage].filter(Boolean).length;
-
   const baselineSummary =
     state.baseline.status === "ready"
       ? `Baseline ${state.baseline.value.status}${state.baseline.value.outcome ? ` · ${state.baseline.value.outcome}` : ""}`
@@ -189,45 +184,104 @@ export function CommandCenter() {
 
   const carouselStages: CarouselStageContent[] = [
     {
-      stage: "capture",
-      title: "Capture",
-      summary: selectedIncidentId ? `${selectedIncidentId}` : "No incident selected yet",
-      description: "What failure was detected",
+      stage: "incident",
+      eyebrow: "Captured evidence",
+      title: "Incident / Trace",
+      summary: selectedIncidentId ?? "No incident selected",
+      description: "Follow the request through Gateway → Checkout → Payment → Ledger",
+      href: "#incident-workspace",
+      actionLabel: "Inspect incident evidence",
       statusChip: selectedIncidentId
         ? { label: "SELECTED", tone: "pass" }
         : { label: "PENDING", tone: "neutral" },
+      metrics: [
+        { label: "Path", value: "4 services" },
+        { label: "Capture", value: selectedIncidentId ? "Detected" : "Waiting" },
+      ],
     },
     {
-      stage: "trace",
-      title: "Trace",
-      summary: "Gateway → Checkout → Payment → Ledger",
-      description: "How the request moved through the system",
+      stage: "capsule",
+      eyebrow: "Replay artifact",
+      title: "Replay Capsule",
+      summary:
+        state.capsule.status === "ready"
+          ? state.capsule.value.capsule_id
+          : state.capsule.status === "loading"
+            ? "Compiling capsule from captured evidence"
+            : state.capsule.status === "error"
+              ? state.capsule.error.message
+              : "Awaiting capsule compilation",
+      description: "Integrity, fixtures, policy, and isolation readiness",
+      href: "#replay-lab",
+      actionLabel: "Open capsule workflow",
+      statusChip:
+        state.capsule.status === "ready"
+          ? { label: "READY", tone: "pass" }
+          : state.capsule.status === "error"
+            ? { label: "BLOCKED", tone: "fail" }
+            : state.capsule.status === "loading"
+              ? { label: "COMPILING", tone: "warning" }
+              : { label: "PENDING", tone: "neutral" },
+      metrics: [
+        {
+          label: "Capsule",
+          value: state.capsule.status === "ready" ? "Compiled" : "Not compiled",
+        },
+        {
+          label: "Isolation",
+          value:
+            state.baseline.status === "ready" && state.baseline.value.isolation_evidence
+              ? state.baseline.value.isolation_evidence.verdict
+              : "Awaiting replay",
+        },
+      ],
     },
     {
       stage: "replay",
+      eyebrow: "Controlled execution",
       title: "Replay",
       summary: `${baselineSummary} · ${whatIfSummary}`,
-      description: "Capsule, baseline, and what-if status",
+      description: "Baseline and what-if",
+      href: "#replay-lab",
+      actionLabel: "Open replay lab",
       statusChip: replayStage
         ? { label: "REPLAYED", tone: "pass" }
         : { label: "IDLE", tone: "neutral" },
+      metrics: [
+        {
+          label: "Baseline",
+          value: state.baseline.status === "ready" ? state.baseline.value.status : "Not started",
+        },
+        {
+          label: "What-if",
+          value: state.whatIf.status === "ready" ? state.whatIf.value.status : "Locked",
+        },
+      ],
     },
     {
       stage: "diff",
+      eyebrow: "Evidence delta",
       title: "Diff",
       summary: diffSummary,
-      description: "What changed between baseline and what-if",
+      description: "First meaningful divergence",
+      href: "#replay-lab",
+      actionLabel: "Inspect replay diff",
       statusChip: diff ? { label: "READY", tone: "pass" } : undefined,
-    },
-    {
-      stage: "overview",
-      title: "Overview",
-      summary: `${completedStageCount} of 4 stages complete`,
-      description: "Workflow progress and isolation status",
-      statusChip:
-        state.baseline.status === "ready" && state.baseline.value.isolation_evidence
-          ? { label: `ISOLATION ${state.baseline.value.isolation_evidence.verdict}`, tone: state.baseline.value.isolation_evidence.verdict === "PASS" ? "pass" : "fail" }
-          : undefined,
+      metrics: diff
+        ? [
+            {
+              label: "Ledger commits",
+              value: String(diff.effect_delta.ledger_commit_count),
+            },
+            {
+              label: "Oracle",
+              value: `${diff.baseline_oracle_result.matched ? "TRUE" : "FALSE"} → ${diff.comparison_oracle_result.matched ? "TRUE" : "FALSE"}`,
+            },
+          ]
+        : [
+            { label: "Baseline", value: "Required" },
+            { label: "What-if", value: "Required" },
+          ],
     },
   ];
 
@@ -238,7 +292,7 @@ export function CommandCenter() {
       </div>
 
       <section className="workspace-intro" aria-labelledby="workspace-title">
-        <div><p className="eyebrow">Capture → Trace → Replay → Diff</p><h1 id="workspace-title">Incident analysis</h1></div>
+        <div><p className="eyebrow">Capture → Trace → Replay → Diff</p><h2 id="workspace-title">Incident analysis</h2></div>
         <p>Contract-decoded evidence from capture through first divergence.</p>
       </section>
 
