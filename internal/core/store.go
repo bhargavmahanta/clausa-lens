@@ -16,6 +16,7 @@ type Repository interface {
 	IngestEvent(context.Context, contracts.ExecutionEvent) error
 	ListIncidents(context.Context, contracts.IncidentListQuery) (contracts.IncidentListResponse, error)
 	GetIncidentDetail(context.Context, string) (contracts.IncidentDetailResponse, error)
+	EventsForExecution(context.Context, string) ([]contracts.ExecutionEvent, error)
 }
 
 type Store struct {
@@ -71,6 +72,25 @@ func (s *Store) IngestEvent(ctx context.Context, e contracts.ExecutionEvent) err
 	}
 	s.events[e.EventID] = e
 	return nil
+}
+
+// EventsForExecution returns every persisted event for one execution in the
+// deterministic chronological order used across the Core API (occurred_at,
+// then sequence, then event_id). This is the query the post-ingestion detector
+// uses to evaluate the accumulated execution against the failure oracle.
+func (s *Store) EventsForExecution(ctx context.Context, executionID string) ([]contracts.ExecutionEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, ErrInternal
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	events := make([]contracts.ExecutionEvent, 0, len(s.events))
+	for _, e := range s.events {
+		if e.ExecutionID == executionID {
+			events = append(events, e)
+		}
+	}
+	return stableOrder(events), nil
 }
 
 // PutIncident atomically validates and stores an incident and its graph.

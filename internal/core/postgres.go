@@ -102,6 +102,19 @@ func (r *PostgresRepository) GetEvent(ctx context.Context, id string) (contracts
 	return getJSON[contracts.ExecutionEvent](ctx, r.db, `SELECT payload FROM execution_events WHERE event_id=$1`, id)
 }
 
+// EventsForExecution returns every persisted event for one execution in the
+// deterministic chronological order (occurred_at, then sequence, then
+// event_id). This is the query the post-ingestion detector uses to evaluate an
+// accumulated execution against the failure oracle.
+func (r *PostgresRepository) EventsForExecution(ctx context.Context, executionID string) ([]contracts.ExecutionEvent, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT payload FROM execution_events WHERE execution_id=$1 ORDER BY occurred_at, sequence, event_id`, executionID)
+	if err != nil {
+		return nil, repositoryError(err)
+	}
+	defer rows.Close()
+	return scanEvents(ctx, rows)
+}
+
 func (r *PostgresRepository) PutIncident(ctx context.Context, i contracts.Incident, g contracts.ExecutionGraph) error {
 	if i.Validate() != nil || g.Validate() != nil || g.IncidentID != i.IncidentID || i.GraphID != g.GraphID {
 		return ErrInternal

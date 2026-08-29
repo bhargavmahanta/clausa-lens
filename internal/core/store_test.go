@@ -33,6 +33,63 @@ func TestStoreRepositorySeamAndDuplicateEvent(t *testing.T) {
 	}
 }
 
+func TestStoreEventsForExecutionFiltersAndOrders(t *testing.T) {
+	store := NewStore()
+	ctx := context.Background()
+	mk := func(id, executionID string, occurred string, seq int) contracts.ExecutionEvent {
+		e := event(id)
+		e.ExecutionID = executionID
+		e.OccurredAt = occurred
+		e.Sequence = seq
+		return e
+	}
+	// Same execution, different ids and timestamps.
+	if err := store.IngestEvent(ctx, mk("b", "exec-1", "2026-08-29T10:32:03Z", 3)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.IngestEvent(ctx, mk("a", "exec-1", "2026-08-29T10:32:01Z", 2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.IngestEvent(ctx, mk("c", "exec-1", "2026-08-29T10:32:02Z", 1)); err != nil {
+		t.Fatal(err)
+	}
+	// A different execution must not leak in.
+	other := mk("other", "exec-2", "2026-08-29T10:32:00Z", 0)
+	if err := store.IngestEvent(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.EventsForExecution(ctx, "exec-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deterministic chronological order regardless of insertion order.
+	order := []string{}
+	for _, e := range got {
+		order = append(order, e.EventID)
+	}
+	if !reflect.DeepEqual(order, []string{"a", "c", "b"}) {
+		t.Fatalf("unexpected order: %v", order)
+	}
+	for _, e := range got {
+		if e.ExecutionID != "exec-1" {
+			t.Fatalf("leaked execution %q", e.ExecutionID)
+		}
+	}
+
+	if none, err := store.EventsForExecution(ctx, "exec-2"); err != nil {
+		t.Fatal(err)
+	} else if len(none) != 1 || none[0].EventID != "other" {
+		t.Fatalf("exec-2 events: %+v", none)
+	}
+
+	if empty, err := store.EventsForExecution(ctx, "no-such-exec"); err != nil {
+		t.Fatal(err)
+	} else if len(empty) != 0 {
+		t.Fatalf("expected no events, got %+v", empty)
+	}
+}
+
 func TestStorePutIncidentIsAtomicAndRejectsDuplicateIDs(t *testing.T) {
 	ctx := context.Background()
 	s := NewStore()

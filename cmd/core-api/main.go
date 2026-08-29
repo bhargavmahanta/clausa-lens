@@ -25,6 +25,7 @@ import (
 // replay routes need. core.Store and core.PostgresRepository both satisfy it.
 type APIRepository interface {
 	core.Repository
+	PutIncident(context.Context, contracts.Incident, contracts.ExecutionGraph) error
 	PutCapsule(context.Context, contracts.ReplayCapsule) error
 	GetCapsule(context.Context, string) (contracts.ReplayCapsule, error)
 	PutRun(context.Context, contracts.ReplayRun) error
@@ -84,6 +85,13 @@ func handlerWithDeps(repository APIRepository, deps HandlerDeps) http.Handler {
 			}
 			writeMappedError(w, err, "")
 			return
+		}
+		// After a valid event is accepted, evaluate the accumulated execution
+		// against the configured System Pack and persist a detected incident when
+		// the failure oracle matches. Detection is best-effort: it never fails the
+		// already-accepted event, so the ingest contract (202) is preserved.
+		if err := detectAndPersistIncident(r.Context(), repository, deps.Pack, event.ExecutionID); err != nil {
+			log.Printf("event %s ingested but incident detection failed: %v", event.EventID, err)
 		}
 		writeJSON(w, http.StatusAccepted, contracts.AcceptedEventResponse{EventID: event.EventID, Status: contracts.Accepted})
 	})

@@ -37,6 +37,117 @@ func TestEventSuccessGoldenBody(t *testing.T) {
 	}
 }
 
+func goldenE1Events() []map[string]any {
+	mk := func(id, parent, component string, eventType string, attempt int, seq int, occurred string, status string, attributes map[string]any) map[string]any {
+		event := map[string]any{
+			"schema_version": "1.0", "event_id": id, "execution_id": "exec-e1", "trace_id": "trace-e1",
+			"component":  map[string]any{"name": component, "instance": component + "-1"},
+			"operation":  map[string]any{"name": "op", "kind": "INTERNAL"},
+			"event_type": eventType, "attempt": attempt, "logical_operation_id": "checkout-1",
+			"occurred_at": occurred, "sequence": seq, "status": status, "attributes": attributes,
+		}
+		if parent != "" {
+			event["parent_event_id"] = parent
+		}
+		return event
+	}
+	return []map[string]any{
+		mk("evt-checkout-start", "", "checkout", "START", 1, 0, "2026-08-29T10:32:01.004Z", "RUNNING", map[string]any{"checkout_timeout_ms": 200}),
+		mk("evt-timeout", "evt-checkout-start", "checkout", "TIMEOUT", 1, 4, "2026-08-29T10:32:01.204Z", "TIMEOUT", map[string]any{}),
+		mk("evt-retry", "evt-timeout", "checkout", "RETRY", 1, 5, "2026-08-29T10:32:01.205Z", "RUNNING", map[string]any{}),
+		mk("evt-ledger-1", "evt-checkout-start", "ledger", "EFFECT", 1, 0, "2026-08-29T10:32:01.365Z", "SUCCESS", map[string]any{"effect_id": "eff-1", "effect_committed": true}),
+		mk("evt-ledger-2", "evt-checkout-start", "ledger", "EFFECT", 2, 1, "2026-08-29T10:32:01.560Z", "SUCCESS", map[string]any{"effect_id": "eff-2", "effect_committed": true}),
+	}
+}
+
+func TestE1EventsDetectAndPersistIncident(t *testing.T) {
+	t.Setenv("PACK_IMPL", "dev")
+	store := core.NewStore()
+	h := handlerWithDeps(store, HandlerDeps{Pack: resolvePack()})
+
+	for _, raw := range goldenE1Events() {
+		body, err := json.Marshal(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := request(t, h, http.MethodPost, "/v1/events", string(body))
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("post %v: %d %s", raw["event_id"], w.Code, w.Body.String())
+		}
+	}
+
+	// The golden execution must have produced exactly one incident.
+	list := request(t, h, http.MethodGet, "/v1/incidents", "")
+	if list.Code != http.StatusOK {
+		t.Fatalf("list: %d %s", list.Code, list.Body.String())
+	}
+	var listed contracts.IncidentListResponse
+	if err := json.Unmarshal(list.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Items) != 1 {
+		t.Fatalf("expected 1 incident, got %d", len(listed.Items))
+	}
+	inc := listed.Items[0]
+	if inc.ExecutionID != "exec-e1" || inc.Status != contracts.IncidentReady {
+		t.Fatalf("incident: %+v", inc)
+	}
+	if inc.SystemPack.ID != "checkout_duplicate_effect_dev" {
+		t.Fatalf("system pack id = %q", inc.SystemPack.ID)
+	}
+
+	// The detail view must return the incident, its graph, and ordered events.
+	detail := request(t, h, http.MethodGet, "/v1/incidents/"+inc.IncidentID, "")
+	if detail.Code != http.StatusOK {
+		t.Fatalf("detail: %d %s", detail.Code, detail.Body.String())
+	}
+	var got contracts.IncidentDetailResponse
+	if err := json.Unmarshal(detail.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Incident.IncidentID != inc.IncidentID || got.Incident.ExecutionID != "exec-e1" {
+		t.Fatalf("detail incident: %+v", got.Incident)
+	}
+	if got.Graph.GraphID == "" || len(got.Graph.Nodes) != len(got.Events) {
+		t.Fatalf("graph/events mismatch: graph=%d nodes events=%d", len(got.Graph.Nodes), len(got.Events))
+	}
+	for _, e := range got.Events {
+		if e.ExecutionID != "exec-e1" {
+			t.Fatalf("detail event leaked execution: %q", e.ExecutionID)
+		}
+	}
+}
+
+func TestE1DetectionIsIdempotentPerExecution(t *testing.T) {
+	t.Setenv("PACK_IMPL", "dev")
+	store := core.NewStore()
+	h := handlerWithDeps(store, HandlerDeps{Pack: resolvePack()})
+	for i, raw := range goldenE1Events() {
+		body, _ := json.Marshal(raw)
+		if w := request(t, h, http.MethodPost, "/v1/events", string(body)); w.Code != http.StatusAccepted {
+			t.Fatalf("post %d: %s", i, w.Body.String())
+		}
+	}
+	// Append one more event for the same execution, with a new id and later time.
+	extra, _ := json.Marshal(map[string]any{
+		"schema_version": "1.0", "event_id": "evt-gateway-complete", "execution_id": "exec-e1", "trace_id": "trace-e1",
+		"component": map[string]any{"name": "gateway", "instance": "gateway-1"}, "operation": map[string]any{"name": "op", "kind": "INTERNAL"},
+		"event_type": "COMPLETE", "attempt": 1, "logical_operation_id": "checkout-1",
+		"occurred_at": "2026-08-29T10:32:01.900Z", "sequence": 0, "status": "SUCCESS", "attributes": map[string]any{},
+		"parent_event_id": "evt-checkout-start",
+	})
+	if w := request(t, h, http.MethodPost, "/v1/events", string(extra)); w.Code != http.StatusAccepted {
+		t.Fatalf("extra: %s", w.Body.String())
+	}
+	// Re-detecting the same execution must not duplicate the incident.
+	list := request(t, h, http.MethodGet, "/v1/incidents", "")
+	var listed contracts.IncidentListResponse
+	_ = json.Unmarshal(list.Body.Bytes(), &listed)
+	if len(listed.Items) != 1 {
+		t.Fatalf("expected 1 idempotent incident, got %d", len(listed.Items))
+	}
+}
+
 func TestEventsRejectInvalidUnknownTrailingAndDuplicate(t *testing.T) {
 	h := handler(core.NewStore())
 	cases := []string{`{}`, strings.TrimSuffix(validEventJSON, "}") + `,"unknown":true}`, validEventJSON + `{}`}
@@ -71,6 +182,7 @@ type fakeRepository struct {
 	diffs        map[string]contracts.ReplayDiff
 	diffErr      error
 	eventsByRun  map[string][]contracts.ExecutionEvent
+	eventsByExec map[string][]contracts.ExecutionEvent
 	graphsByRun  map[string]contracts.ExecutionGraph
 	resetCounts  core.ResetCounts
 	resetErr     error
@@ -78,6 +190,9 @@ type fakeRepository struct {
 }
 
 func (f *fakeRepository) IngestEvent(context.Context, contracts.ExecutionEvent) error { return f.err }
+func (f *fakeRepository) PutIncident(context.Context, contracts.Incident, contracts.ExecutionGraph) error {
+	return f.err
+}
 func (f *fakeRepository) ListIncidents(_ context.Context, q contracts.IncidentListQuery) (contracts.IncidentListResponse, error) {
 	f.query = q
 	return f.list, f.err
@@ -161,6 +276,12 @@ func (f *fakeRepository) EventsForRun(_ context.Context, run contracts.ReplayRun
 		return nil, f.runErr
 	}
 	return f.eventsByRun[run.RunID], nil
+}
+func (f *fakeRepository) EventsForExecution(_ context.Context, executionID string) ([]contracts.ExecutionEvent, error) {
+	if f.runErr != nil {
+		return nil, f.runErr
+	}
+	return f.eventsByExec[executionID], nil
 }
 func (f *fakeRepository) GraphsForRun(_ context.Context, run contracts.ReplayRun) (contracts.ExecutionGraph, error) {
 	if f.runErr != nil {
