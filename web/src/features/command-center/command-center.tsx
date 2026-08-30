@@ -33,6 +33,7 @@ import {
 import {
   createCommandCenterWorkflow,
   type DemoTriggerState,
+  type HealthyControlResult,
 } from "./workflow";
 
 function toFrontendError(error: unknown): FrontendError {
@@ -87,6 +88,8 @@ export function CommandCenter() {
   );
   const [selectionRequest, setSelectionRequest] = useState<SelectionRequest>();
   const [demo, setDemo] = useState<DemoTriggerState>({ status: "idle" });
+  const [healthyControl, setHealthyControl] = useState<HealthyControlResult>();
+  const [healthyControlRunning, setHealthyControlRunning] = useState(false);
   const selectedIncidentRef = useRef<string | undefined>(undefined);
 
   const handleIncidentDetected = useCallback((incident: Incident) => {
@@ -145,6 +148,16 @@ export function CommandCenter() {
       baseline_run_id: state.baseline.value.run_id,
       comparison_run_id: state.whatIf.value.run_id,
     });
+  }
+
+  async function runHealthyControl() {
+    setHealthyControlRunning(true);
+    setHealthyControl(undefined);
+    try {
+      setHealthyControl(await workflow.runHealthyControl());
+    } finally {
+      setHealthyControlRunning(false);
+    }
   }
 
   async function confirmReset() {
@@ -302,18 +315,37 @@ export function CommandCenter() {
           <h2 id="demo-trigger-title">Golden scenario</h2>
           <p className="evidence-note">Triggers the fixed faulted checkout and opens the detected incident automatically.</p>
         </div>
-        <button
-          aria-live="polite"
-          disabled={demoPending}
-          onClick={() => void workflow.startFaultedCheckout()}
-          type="button"
-        >
-          {demo.status === "starting"
-            ? "Starting faulted checkout…"
-            : demo.status === "waiting"
-              ? "Waiting for incident detection…"
-              : "Start Faulted Checkout"}
-        </button>
+        <div className="demo-trigger-actions">
+          <button
+            aria-live="polite"
+            disabled={demoPending}
+            onClick={() => void workflow.startFaultedCheckout()}
+            type="button"
+          >
+            {demo.status === "starting"
+              ? "Starting faulted checkout…"
+              : demo.status === "waiting"
+                ? "Waiting for incident detection…"
+                : "Start Faulted Checkout"}
+          </button>
+          <button
+            aria-live="polite"
+            disabled={demoPending || healthyControlRunning}
+            onClick={() => void runHealthyControl()}
+            type="button"
+          >
+            {healthyControlRunning ? "Running healthy checkout…" : "Run healthy checkout (control)"}
+          </button>
+        </div>
+        {healthyControl ? (
+          <p className="evidence-note" role="status">
+            {healthyControl.status === "silent"
+              ? `Healthy control ${healthyControl.traceId}: ${healthyControl.attempts} payment attempt, no timeout, no retry — the failure oracle stayed silent and created no incident.`
+              : healthyControl.status === "unexpected-incident"
+                ? `Unexpected: an incident was detected for healthy control ${healthyControl.traceId}. The oracle must stay silent on a healthy trace — investigate.`
+                : `Healthy control failed: ${healthyControl.error.message}`}
+          </p>
+        ) : null}
       </section>
       {demo.status === "failed" ? (
         <StatePanel

@@ -6,9 +6,24 @@ export const goldenCheckoutBody = {
   currency: "INR",
 } as const;
 
+// Healthy control trigger: an explicit control identifier so the run never
+// consumes the deterministic golden seed, and scenario:"healthy" so the
+// gateway lowers the payment latency below the checkout timeout for this
+// execution only. The failure oracle must stay silent on this trace.
+export const healthyControlCheckoutBody = {
+  checkout_id: "ctrl-1",
+  scenario: "healthy",
+  amount_minor: 4999,
+  currency: "INR",
+} as const;
+
 export type DemoCheckoutTrace = {
   traceId: string;
   executionId: string;
+};
+
+export type DemoCheckoutOutcome = DemoCheckoutTrace & {
+  attempts: number;
 };
 
 export function findIncidentByTrace(
@@ -65,4 +80,30 @@ export async function requestDemoCheckout(fetchImpl: typeof fetch): Promise<Demo
     throw new Error("The gateway returned an unusable checkout response.");
   }
   return { traceId: trace.trace_id, executionId: trace.execution_id };
+}
+
+export async function requestHealthyControlCheckout(
+  fetchImpl: typeof fetch,
+): Promise<DemoCheckoutOutcome> {
+  const response = await fetchImpl("/api/demo/checkout/control", {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  const body: unknown = await response.json().catch(() => undefined);
+
+  if (!response.ok) {
+    const apiError = (body as { error?: { message?: string } } | undefined)?.error;
+    throw new Error(apiError?.message ?? "The healthy control checkout failed.");
+  }
+  const trace = body as
+    | { trace_id?: unknown; execution_id?: unknown; attempts?: unknown }
+    | undefined;
+  if (typeof trace?.trace_id !== "string" || typeof trace?.execution_id !== "string") {
+    throw new Error("The gateway returned an unusable healthy control response.");
+  }
+  return {
+    traceId: trace.trace_id,
+    executionId: trace.execution_id,
+    attempts: typeof trace.attempts === "number" ? trace.attempts : 0,
+  };
 }

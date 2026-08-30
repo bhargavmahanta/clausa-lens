@@ -21,9 +21,39 @@ type authorizeWireResponse struct {
 	Status string `json:"status"`
 }
 
+// configLatencyWireRequest is the wire shape for POST /config/latency, the
+// demo control used by the Gateway's healthy-control scenario. It is not
+// part of the frozen Core API contract.
+type configLatencyWireRequest struct {
+	LatencyMs int `json:"latency_ms"`
+}
+
+type configLatencyWireResponse struct {
+	LatencyMs int `json:"latency_ms"`
+}
+
 // Handler exposes Service over HTTP as POST /authorize.
 func Handler(svc *Service) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/config/latency", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var wire configLatencyWireRequest
+		if err := json.NewDecoder(r.Body).Decode(&wire); err != nil {
+			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+			return
+		}
+		if wire.LatencyMs < 1 || wire.LatencyMs > 10000 {
+			http.Error(w, "latency_ms must be between 1 and 10000", http.StatusBadRequest)
+			return
+		}
+		svc.SetLatencyMs(wire.LatencyMs)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(configLatencyWireResponse{LatencyMs: svc.LatencyMs()})
+	})
 	mux.HandleFunc("/authorize", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -62,6 +92,34 @@ type Client struct {
 
 // NewClient returns a Client pointed at baseURL (e.g. http://demo-payment:8082).
 func NewClient(baseURL string) *Client { return &Client{BaseURL: baseURL, HTTP: http.DefaultClient} }
+
+// SetLatency reconfigures the simulator's per-attempt latency via the demo
+// POST /config/latency control endpoint.
+func (c *Client) SetLatency(ctx context.Context, latencyMs int) error {
+	body, err := json.Marshal(configLatencyWireRequest{LatencyMs: latencyMs})
+	if err != nil {
+		return fmt.Errorf("payment client: marshal config request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/config/latency", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("payment client: build config request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := c.HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("payment client: config request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("payment client: unexpected config status %d", resp.StatusCode)
+	}
+	return nil
+}
 
 // Authorize calls the demo Payment simulator's POST /authorize endpoint.
 func (c *Client) Authorize(ctx context.Context, req AuthorizeRequest) (AuthorizeResult, error) {

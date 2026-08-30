@@ -15,6 +15,7 @@ type checkoutWireRequest struct {
 	CheckoutID  string `json:"checkout_id,omitempty"`
 	AmountMinor int    `json:"amount_minor,omitempty"`
 	Currency    string `json:"currency,omitempty"`
+	Scenario    string `json:"scenario,omitempty"`
 }
 
 type checkoutWireResponse struct {
@@ -41,7 +42,7 @@ func Handler(svc *Service) http.Handler {
 				return
 			}
 		}
-		result, err := svc.Checkout(r.Context(), Request{CheckoutID: wire.CheckoutID})
+		result, err := svc.Checkout(r.Context(), Request{CheckoutID: wire.CheckoutID, Scenario: wire.Scenario})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

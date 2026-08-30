@@ -13,6 +13,16 @@ describe("judge demo trigger flow", () => {
     });
   });
 
+  it("sends the healthy control payload with an explicit control identifier", async () => {
+    const { healthyControlCheckoutBody } = await import("../../src/features/demo/trigger");
+    expect(healthyControlCheckoutBody).toEqual({
+      checkout_id: "ctrl-1",
+      scenario: "healthy",
+      amount_minor: 4999,
+      currency: "INR",
+    });
+  });
+
   it("resolves the detected incident by trace and execution identity", async () => {
     const { findIncidentByTrace } = await import("../../src/features/demo/trigger");
     const match = incident as unknown as Incident;
@@ -116,6 +126,36 @@ describe("judge demo trigger flow", () => {
         new Response(
           JSON.stringify({ error: { code: "INTERNAL_FAILURE", message: "gateway down", retryable: false, details: {} } }),
           { status: 503 },
+        ),
+      ),
+    ).rejects.toThrow("gateway down");
+  });
+
+  it("maps the healthy control endpoint onto an outcome with attempts", async () => {
+    const { requestHealthyControlCheckout } = await import("../../src/features/demo/trigger");
+
+    const outcome = await requestHealthyControlCheckout(async () =>
+      new Response(
+        JSON.stringify({
+          trace_id: "trace-ctrl-1",
+          execution_id: "exec-original-ctrl-1",
+          logical_operation_id: "checkout-ctrl-1",
+          attempts: 1,
+        }),
+        { status: 200 },
+      ),
+    );
+    expect(outcome).toEqual({
+      traceId: "trace-ctrl-1",
+      executionId: "exec-original-ctrl-1",
+      attempts: 1,
+    });
+
+    await expect(
+      requestHealthyControlCheckout(async () =>
+        new Response(
+          JSON.stringify({ error: { code: "INTERNAL_FAILURE", message: "gateway down", retryable: false, details: {} } }),
+          { status: 502 },
         ),
       ),
     ).rejects.toThrow("gateway down");
