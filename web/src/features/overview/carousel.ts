@@ -37,8 +37,8 @@ export const desktopOrbitGeometry: OrbitGeometry = {
   backDrop: 360,
   depth: 520,
   tilt: -0.02,
-  minScale: 0.56,
-  maxBlur: 4,
+  minScale: 0.6,
+  maxBlur: 2.4,
 };
 
 const fullTurn = Math.PI * 2;
@@ -109,7 +109,7 @@ export function getOrbitTransform(
     rotateX: (1 - frontness) * 8,
     rotateY: Math.sin(theta) * -24,
     rotateZ: Math.sin(theta) * -14,
-    opacity: 0.34 + frontness * 0.66,
+    opacity: 0.48 + frontness * 0.52,
     blur: geometry.maxBlur * (1 - frontness),
     zIndex: Math.round(frontness * 100),
     frontness,
