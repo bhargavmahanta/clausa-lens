@@ -7,6 +7,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	checkoutsvc "github.com/causalens/causalens/cmd/demo-checkout/service"
@@ -24,9 +25,13 @@ type CheckoutClient interface {
 // Request is the inbound POST /checkout payload. CheckoutID is optional:
 // when absent, Gateway allocates the next deterministic identifier from its
 // IDGenerator, matching the reset contract's requirement that a fresh reset
-// reports a deterministic next_logical_operation_id.
+// reports a deterministic next_logical_operation_id. Scenario selects the
+// run shape: "" (or "faulted") runs the golden duplicate-effect scenario;
+// "healthy" runs the control scenario whose payment completes before the
+// checkout timeout, so the failure oracle must stay silent.
 type Request struct {
 	CheckoutID string
+	Scenario   string
 }
 
 // Result reports the identifiers Gateway allocated for this checkout and how
@@ -38,17 +43,50 @@ type Result struct {
 	Attempts           int
 }
 
+// ScenarioHealthy requests the healthy control run; any other value keeps
+// the golden faulted behavior.
+const ScenarioHealthy = "healthy"
+
+// ControlCheckoutID is the fixed identifier for healthy-control runs. It is
+// explicit so control runs never consume the deterministic golden seed and
+// the faulted demo keeps reporting checkout-8271 after a reset.
+const ControlCheckoutID = "ctrl-1"
+
+// HealthyPaymentLatencyMs and GoldenPaymentLatencyMs are the per-attempt
+// payment latencies for the control and golden scenarios. 50 ms completes
+// before Checkout's 200 ms timeout; 350 ms is the frozen golden fault
+// configuration (Payment's DefaultLatencyMs).
+const (
+	HealthyPaymentLatencyMs = 50
+	GoldenPaymentLatencyMs  = 350
+)
+
+// PaymentLatencyController reconfigures the Payment simulator's configured
+// latency for the healthy-control scenario. The demo binary wires this to
+// the payment service's HTTP client; tests may substitute a stub.
+type PaymentLatencyController interface {
+	SetLatency(ctx context.Context, latencyMs int) error
+}
+
 // Service is the demo Gateway. It is safe for concurrent use.
 type Service struct {
 	checkout CheckoutClient
 	ids      *capture.IDGenerator
 	recorder *capture.Recorder
+	payment  PaymentLatencyController
 }
 
 // New returns a Gateway that allocates identifiers from ids and forwards
 // checkout requests through checkout.
 func New(checkout CheckoutClient, ids *capture.IDGenerator, recorder *capture.Recorder) *Service {
 	return &Service{checkout: checkout, ids: ids, recorder: recorder}
+}
+
+// WithPaymentLatencyControl attaches the Payment latency controller used by
+// the healthy-control scenario.
+func (s *Service) WithPaymentLatencyControl(payment PaymentLatencyController) *Service {
+	s.payment = payment
+	return s
 }
 
 // Reset restores deterministic identifier allocation, matching the reset
@@ -62,9 +100,13 @@ func (s *Service) NextLogicalOperationID() string { return s.ids.PeekNextLogical
 
 // Checkout runs one golden checkout request end to end: it allocates
 // identifiers, records the ENTRYPOINT event, forwards to Checkout, and
-// records the completion.
+// records the completion. Healthy-control requests temporarily lower the
+// Payment latency and always restore the golden configuration afterwards.
 func (s *Service) Checkout(ctx context.Context, req Request) (Result, error) {
 	checkoutID := normalizeCheckoutID(req.CheckoutID)
+	if checkoutID == "" && req.Scenario == ScenarioHealthy {
+		checkoutID = ControlCheckoutID
+	}
 	if checkoutID == "" {
 		seq := s.ids.NextCheckoutSeq()
 		checkoutID = fmt.Sprintf("%d", seq)
@@ -72,6 +114,20 @@ func (s *Service) Checkout(ctx context.Context, req Request) (Result, error) {
 	traceID := "trace-" + checkoutID
 	executionID := "exec-original-" + checkoutID
 	logicalOperationID := "checkout-" + checkoutID
+
+	if req.Scenario == ScenarioHealthy {
+		if s.payment == nil {
+			return Result{}, fmt.Errorf("gateway: healthy control requires a payment latency controller")
+		}
+		if err := s.payment.SetLatency(ctx, HealthyPaymentLatencyMs); err != nil {
+			return Result{}, fmt.Errorf("gateway: healthy control: set payment latency: %w", err)
+		}
+		defer func() {
+			if err := s.payment.SetLatency(ctx, GoldenPaymentLatencyMs); err != nil {
+				log.Printf("gateway: healthy control: restore payment latency: %v", err)
+			}
+		}()
+	}
 
 	start, err := s.recorder.Record(ctx, capture.RecordInput{
 		ExecutionID:        executionID,

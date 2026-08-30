@@ -76,6 +76,7 @@ services:
     environment:
       PORT: "8080"
       CHECKOUT_URL: http://demo-checkout:8081
+      PAYMENT_URL: http://demo-payment:8082
       CORE_API_EVENTS_URL: http://core-api:8080/v1/events
     ports:
       - "${GATEWAY_PORT:-18080}:8080"

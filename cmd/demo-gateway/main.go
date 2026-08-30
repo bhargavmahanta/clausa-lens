@@ -9,6 +9,7 @@ import (
 
 	checkoutsvc "github.com/causalens/causalens/cmd/demo-checkout/service"
 	gatewaysvc "github.com/causalens/causalens/cmd/demo-gateway/service"
+	paymentsvc "github.com/causalens/causalens/cmd/demo-payment/service"
 	"github.com/causalens/causalens/internal/capture"
 	"github.com/causalens/causalens/internal/contracts"
 )
@@ -22,6 +23,10 @@ func main() {
 	if checkoutURL == "" {
 		checkoutURL = "http://localhost:8081"
 	}
+	paymentURL := os.Getenv("PAYMENT_URL")
+	if paymentURL == "" {
+		paymentURL = "http://localhost:8082"
+	}
 
 	sink := capture.Sink(capture.NewInMemorySink())
 	if coreAPIURL := os.Getenv("CORE_API_EVENTS_URL"); coreAPIURL != "" {
@@ -31,7 +36,7 @@ func main() {
 	ids := capture.NewIDGenerator(capture.DefaultCheckoutSeed)
 
 	checkout := checkoutsvc.NewClient(checkoutURL)
-	svc := gatewaysvc.New(checkout, ids, recorder)
+	svc := gatewaysvc.New(checkout, ids, recorder).WithPaymentLatencyControl(paymentsvc.NewClient(paymentURL))
 	handler := gatewaysvc.Handler(svc)
 
 	log.Printf("demo-gateway listening on :%s (checkout=%s)", port, checkoutURL)

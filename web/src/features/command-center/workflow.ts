@@ -10,6 +10,7 @@ import type {
 import {
   pollForIncident,
   requestDemoCheckout,
+  requestHealthyControlCheckout,
 } from "../demo/trigger";
 import { pollRunUntilTerminal } from "../replay/run-tracker";
 import { isActiveRunStatus } from "../replay/workflow";
@@ -24,6 +25,11 @@ export type DemoTriggerState =
   | { status: "idle" }
   | { status: "starting" }
   | { status: "waiting" }
+  | { status: "failed"; error: FrontendError };
+
+export type HealthyControlResult =
+  | { status: "silent"; attempts: number; traceId: string }
+  | { status: "unexpected-incident"; attempts: number; traceId: string }
   | { status: "failed"; error: FrontendError };
 
 export type CommandCenterWorkflowDeps = {
@@ -50,6 +56,7 @@ export type CommandCenterWorkflow = {
   createDiff: (request: { baseline_run_id: string; comparison_run_id: string }) => Promise<void>;
   confirmReset: () => Promise<ResetResult | undefined>;
   startFaultedCheckout: () => Promise<void>;
+  runHealthyControl: () => Promise<HealthyControlResult>;
 };
 
 export function createCommandCenterWorkflow(
@@ -202,6 +209,28 @@ export function createCommandCenterWorkflow(
     }
   }
 
+  async function runHealthyControl(): Promise<HealthyControlResult> {
+    try {
+      const outcome = await requestHealthyControlCheckout(fetchImpl);
+      const incident = await pollForIncident({
+        listIncidents: (query) => client.listIncidents(query),
+        trace: outcome,
+        intervalMs: pollIntervalMs,
+        maxAttempts: pollMaxAttempts,
+      });
+      if (incident) {
+        return {
+          status: "unexpected-incident",
+          attempts: outcome.attempts,
+          traceId: outcome.traceId,
+        };
+      }
+      return { status: "silent", attempts: outcome.attempts, traceId: outcome.traceId };
+    } catch (error) {
+      return { status: "failed", error: toFrontendError(error) };
+    }
+  }
+
   return {
     token,
     invalidate: () => token.invalidate(),
@@ -212,5 +241,6 @@ export function createCommandCenterWorkflow(
     createDiff,
     confirmReset,
     startFaultedCheckout,
+    runHealthyControl,
   };
 }
