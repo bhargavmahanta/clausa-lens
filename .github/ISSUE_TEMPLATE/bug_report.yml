@@ -1,0 +1,60 @@
+name: Bug report
+description: Report a reproducible defect in CausaLens
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve CausaLens. Do not include secrets or production data.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Start the stack with ...
+        2. Open ...
+        3. Click ...
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit or version
+      placeholder: Git SHA or branch name
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Command Center
+        - Core API
+        - Replay worker
+        - Demo services
+        - Database/migrations
+        - Docker/deployment
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs and evidence
+      description: Include relevant sanitized logs, screenshots, console output, or network responses.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, tokens, personal data, and production payloads.
+          required: true
