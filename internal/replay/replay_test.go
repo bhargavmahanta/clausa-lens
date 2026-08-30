@@ -239,6 +239,12 @@ func TestNewRunBaselineZeroInterventionValid(t *testing.T) {
 	if err := run.Validate(); err != nil {
 		t.Fatalf("created baseline must validate: %v", err)
 	}
+	if run.ObservedEventIDs == nil {
+		t.Fatal("created run must carry a non-nil observed_event_ids slice")
+	}
+	if len(run.ObservedEventIDs) != 0 {
+		t.Fatalf("created run observed_event_ids must be empty, got %d", len(run.ObservedEventIDs))
+	}
 }
 
 func TestNewRunWhatIfRequiresIntervention(t *testing.T) {

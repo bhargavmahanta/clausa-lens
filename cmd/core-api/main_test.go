@@ -561,6 +561,23 @@ func TestCreateRunAcceptsWhatIf(t *testing.T) {
 	}
 }
 
+func TestCreateRunReturnsEmptyObservedEventIDs(t *testing.T) {
+	f := &fakeRepository{capsules: map[string]contracts.ReplayCapsule{
+		"cap-1": {CapsuleID: "cap-1", Integrity: contracts.Integrity{Algorithm: contracts.IntegritySHA256, Digest: validDigest}},
+	}}
+	w := request(t, handler(f), http.MethodPost, "/v1/capsules/cap-1/runs", `{"run_type":"BASELINE"}`)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if strings.Contains(body, `"observed_event_ids":null`) {
+		t.Fatalf("raw response must not serialize observed_event_ids as null: %s", body)
+	}
+	if !strings.Contains(body, `"observed_event_ids":[]`) {
+		t.Fatalf("raw response must serialize observed_event_ids as an empty array: %s", body)
+	}
+}
+
 func TestCreateRunWhatIfRejectingBaselineConflicts(t *testing.T) {
 	f := &fakeRepository{
 		capsules:  map[string]contracts.ReplayCapsule{"cap-1": {CapsuleID: "cap-1", Integrity: contracts.Integrity{Algorithm: contracts.IntegritySHA256, Digest: validDigest}}},

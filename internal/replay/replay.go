@@ -36,16 +36,17 @@ func NewRun(runID, executionID, capsuleID, capsuleHash string, runType contracts
 	baselineRunID string, intervention *contracts.Intervention, trialNumber int) (contracts.ReplayRun, error) {
 
 	run := contracts.ReplayRun{
-		SchemaVersion: contracts.ContractVersion,
-		RunID:         runID,
-		ExecutionID:   executionID,
-		CapsuleID:     capsuleID,
-		CapsuleHash:   capsuleHash,
-		RunType:       runType,
-		BaselineRunID: baselineRunID,
-		Intervention:  intervention,
-		TrialNumber:   trialNumber,
-		Status:        contracts.ReplayRunCreated,
+		SchemaVersion:    contracts.ContractVersion,
+		RunID:            runID,
+		ExecutionID:      executionID,
+		CapsuleID:        capsuleID,
+		CapsuleHash:      capsuleHash,
+		RunType:          runType,
+		BaselineRunID:    baselineRunID,
+		Intervention:     intervention,
+		TrialNumber:      trialNumber,
+		Status:           contracts.ReplayRunCreated,
+		ObservedEventIDs: []string{},
 	}
 
 	switch runType {
