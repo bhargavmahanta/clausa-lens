@@ -56,6 +56,21 @@ describe("overview carousel orbit", () => {
     expect(middle.z).toBeLessThan(Math.max(start.z, end.z));
   });
 
+  it("keeps background cards legible while preserving depth", async () => {
+    const { getOrbitTransform } = await import(
+      "../../src/features/overview/carousel"
+    );
+
+    const side = getOrbitTransform(1, 0, 4);
+    const back = getOrbitTransform(2, 0, 4);
+
+    expect(side.opacity).toBeGreaterThanOrEqual(0.72);
+    expect(side.blur).toBeLessThanOrEqual(1.25);
+    expect(back.opacity).toBeGreaterThanOrEqual(0.48);
+    expect(back.blur).toBeLessThanOrEqual(2.5);
+    expect(side.z).toBeGreaterThan(back.z);
+  });
+
   it("lifts the side cards while dropping the rear card along the curved surface", async () => {
     const { getOrbitTransform } = await import(
       "../../src/features/overview/carousel"
