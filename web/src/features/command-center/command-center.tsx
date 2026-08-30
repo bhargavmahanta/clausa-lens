@@ -27,6 +27,10 @@ import {
   type ReplayWorkflowState,
 } from "../replay";
 import {
+  OverviewCarousel,
+  type CarouselStageContent,
+} from "../overview";
+import {
   createCommandCenterWorkflow,
   type DemoTriggerState,
 } from "./workflow";
@@ -163,14 +167,136 @@ export function CommandCenter() {
   const diff = state.diff.status === "ready" ? state.diff.value : undefined;
   const demoPending = demo.status === "starting" || demo.status === "waiting";
 
+  const replayStage = state.baseline.status === "ready" && state.baseline.value.status === "COMPLETED";
+  const baselineSummary =
+    state.baseline.status === "ready"
+      ? `Baseline ${state.baseline.value.status}${state.baseline.value.outcome ? ` · ${state.baseline.value.outcome}` : ""}`
+      : "Baseline not started";
+  const whatIfSummary =
+    state.whatIf.status === "ready"
+      ? `What-if ${state.whatIf.value.status}${state.whatIf.value.outcome ? ` · ${state.whatIf.value.outcome}` : ""}`
+      : "What-if locked until a reproduced baseline";
+  const diffSummary = diff
+      ? `${diff.effect_delta.payment_attempt_count} attempts · ${diff.effect_delta.ledger_commit_count} ledger commits · oracle ${
+          diff.baseline_oracle_result.matched ? "MATCHED" : "NOT MATCHED"
+        } → ${diff.comparison_oracle_result.matched ? "MATCHED" : "NOT MATCHED"}`
+      : "Awaiting baseline and what-if runs";
+
+  const carouselStages: CarouselStageContent[] = [
+    {
+      stage: "incident",
+      eyebrow: "Captured evidence",
+      title: "Incident / Trace",
+      summary: selectedIncidentId ?? "No incident selected",
+      description: "Follow the request through Gateway → Checkout → Payment → Ledger",
+      href: "#incident-workspace",
+      actionLabel: "Inspect incident evidence",
+      statusChip: selectedIncidentId
+        ? { label: "SELECTED", tone: "pass" }
+        : { label: "PENDING", tone: "neutral" },
+      metrics: [
+        { label: "Path", value: "4 services" },
+        { label: "Capture", value: selectedIncidentId ? "Detected" : "Waiting" },
+      ],
+    },
+    {
+      stage: "capsule",
+      eyebrow: "Replay artifact",
+      title: "Replay Capsule",
+      summary:
+        state.capsule.status === "ready"
+          ? state.capsule.value.capsule_id
+          : state.capsule.status === "loading"
+            ? "Compiling capsule from captured evidence"
+            : state.capsule.status === "error"
+              ? state.capsule.error.message
+              : "Awaiting capsule compilation",
+      description: "Integrity, fixtures, policy, and isolation readiness",
+      href: "#replay-lab",
+      actionLabel: "Open capsule workflow",
+      statusChip:
+        state.capsule.status === "ready"
+          ? { label: "READY", tone: "pass" }
+          : state.capsule.status === "error"
+            ? { label: "BLOCKED", tone: "fail" }
+            : state.capsule.status === "loading"
+              ? { label: "COMPILING", tone: "warning" }
+              : { label: "PENDING", tone: "neutral" },
+      metrics: [
+        {
+          label: "Capsule",
+          value: state.capsule.status === "ready" ? "Compiled" : "Not compiled",
+        },
+        {
+          label: "Isolation",
+          value:
+            state.baseline.status === "ready" && state.baseline.value.isolation_evidence
+              ? state.baseline.value.isolation_evidence.verdict
+              : "Awaiting replay",
+        },
+      ],
+    },
+    {
+      stage: "replay",
+      eyebrow: "Controlled execution",
+      title: "Replay",
+      summary: `${baselineSummary} · ${whatIfSummary}`,
+      description: "Baseline and what-if",
+      href: "#replay-lab",
+      actionLabel: "Open replay lab",
+      statusChip: replayStage
+        ? { label: "REPLAYED", tone: "pass" }
+        : { label: "IDLE", tone: "neutral" },
+      metrics: [
+        {
+          label: "Baseline",
+          value: state.baseline.status === "ready" ? state.baseline.value.status : "Not started",
+        },
+        {
+          label: "What-if",
+          value: state.whatIf.status === "ready" ? state.whatIf.value.status : "Locked",
+        },
+      ],
+    },
+    {
+      stage: "diff",
+      eyebrow: "Evidence delta",
+      title: "Diff",
+      summary: diffSummary,
+      description: "First meaningful divergence",
+      href: "#replay-lab",
+      actionLabel: "Inspect replay diff",
+      statusChip: diff ? { label: "READY", tone: "pass" } : undefined,
+      metrics: diff
+        ? [
+            {
+              label: "Ledger commits",
+              value: String(diff.effect_delta.ledger_commit_count),
+            },
+            {
+              label: "Oracle",
+              value: `${diff.baseline_oracle_result.matched ? "TRUE" : "FALSE"} → ${diff.comparison_oracle_result.matched ? "TRUE" : "FALSE"}`,
+            },
+          ]
+        : [
+            { label: "Baseline", value: "Required" },
+            { label: "What-if", value: "Required" },
+          ],
+    },
+  ];
+
   return (
     <>
+      <div id="overview-hero">
+        <OverviewCarousel stages={carouselStages} />
+      </div>
+
       <section className="workspace-intro" aria-labelledby="workspace-title">
-        <div><p className="eyebrow">Capture → Trace → Replay → Diff</p><h1 id="workspace-title">Incident analysis</h1></div>
+        <div><p className="eyebrow">Capture → Trace → Replay → Diff</p><h2 id="workspace-title">Incident analysis</h2></div>
         <p>Contract-decoded evidence from capture through first divergence.</p>
       </section>
 
-      <section className="demo-trigger" aria-labelledby="demo-trigger-title">
+      <section className="demo-trigger" id="demo-trigger" aria-labelledby="demo-trigger-title">
         <div>
           <p className="panel-kicker">Judge control</p>
           <h2 id="demo-trigger-title">Golden scenario</h2>
@@ -199,13 +325,16 @@ export function CommandCenter() {
         />
       ) : null}
 
-      <IncidentCommandCenter
-        key={incidentVersion}
-        onSelectionChange={handleSelectionChange}
-        selectionRequest={selectionRequest}
-      />
+      <div id="incident-workspace">
+        <IncidentCommandCenter
+          key={incidentVersion}
+          onSelectionChange={handleSelectionChange}
+          selectionRequest={selectionRequest}
+        />
+      </div>
 
-      <ReplayWorkspace
+      <div id="replay-lab">
+        <ReplayWorkspace
         baselineLoading={state.baseline.status === "loading"}
         diff={diff}
         diffLoading={state.diff.status === "loading"}
@@ -218,11 +347,12 @@ export function CommandCenter() {
         whatIfLoading={state.whatIf.status === "loading"}
         whatIfRun={whatIf}
       />
+      </div>
 
       {state.whatIf.status === "error" ? <StatePanel state="error" title="What-if replay unavailable" message={state.whatIf.error.message} code={state.whatIf.error.code} /> : null}
       {state.diff.status === "error" ? <StatePanel state="error" title="Replay Diff unavailable" message={state.diff.error.message} code={state.diff.error.code} /> : null}
 
-      <section className="reset-control" aria-labelledby="reset-control-title">
+      <section className="reset-control" id="reset-control" aria-labelledby="reset-control-title">
         <div><p className="panel-kicker">Deterministic scenario</p><h2 id="reset-control-title">Reset demo workflow</h2></div>
         <button onClick={() => dispatch({ type: "resetConfirmationOpened" })} type="button">Reset demo workflow</button>
       </section>

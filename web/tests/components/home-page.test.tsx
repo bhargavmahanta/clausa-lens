@@ -10,6 +10,12 @@ describe("Command Center home", () => {
     expect(markup).toContain("CausaLens");
     expect(markup).toContain("Command Center");
     expect(markup).toContain("Incident analysis");
+    expect(markup).toContain("See the failure. Change one thing.");
+    expect(markup).toContain("Replay Capsule");
+    expect(markup).toContain('aria-roledescription="3D card orbit"');
+    expect(markup).toContain('class="ambient-scene"');
+    expect(markup).toContain("/figma/command-center-room.png");
+    expect(markup).toContain('class="ambient-ring-glow"');
     expect(markup).toContain("Loading incident evidence");
     expect(markup).toContain("Capture → Trace");
     expect(markup).toContain('aria-label="Replay workflow actions"');
